@@ -8,6 +8,8 @@ export async function launchContinuation(
   params: LaunchContinuationParams,
 ): Promise<{ followUpRunId: string }> {
   const followUpRunId = `${KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX}${crypto.randomUUID()}`;
+  const provider = params.sessionRoute.modelProviderId ?? params.candidate.modelProviderId;
+  const model = params.sessionRoute.modelId ?? params.candidate.modelId;
   const extraSystemPrompt = [
     "A completion validator flagged the previous turn as possibly incomplete.",
     "The validator may be wrong.",
@@ -29,8 +31,10 @@ export async function launchContinuation(
     workspaceDir: params.candidate.workspaceDir,
     config: api.config,
     prompt: "Continue the previous task.",
-    provider: params.candidate.modelProviderId,
-    model: params.candidate.modelId,
+    provider,
+    model,
+    authProfileId: params.sessionRoute.authProfileId,
+    authProfileIdSource: params.sessionRoute.authProfileIdSource,
     timeoutMs: params.timeoutMs,
     runId: followUpRunId,
     trigger: "manual",

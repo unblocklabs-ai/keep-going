@@ -4,6 +4,12 @@ import type { SessionRoute } from "./types.js";
 type SessionEntry = {
   sessionFile?: string;
   spawnedBy?: string;
+  modelProvider?: string;
+  model?: string;
+  providerOverride?: string;
+  modelOverride?: string;
+  authProfileOverride?: string;
+  authProfileOverrideSource?: "auto" | "user";
   deliveryContext?: {
     channel?: string;
     to?: string;
@@ -75,6 +81,14 @@ export function resolveSessionRoute(
       normalizeThreadId(entry.deliveryContext?.threadId) ??
       normalizeThreadId(entry.lastThreadId) ??
       normalizeThreadId(entry.origin?.threadId);
+    const modelProviderId =
+      normalizeString(entry.modelProvider) ?? normalizeString(entry.providerOverride);
+    const modelId = normalizeString(entry.model) ?? normalizeString(entry.modelOverride);
+    const authProfileId = normalizeString(entry.authProfileOverride);
+    const authProfileIdSource =
+      authProfileId && entry.authProfileOverrideSource
+        ? entry.authProfileOverrideSource
+        : undefined;
 
     return {
       lookupStatus: "ok",
@@ -85,6 +99,10 @@ export function resolveSessionRoute(
       threadId,
       spawnedBy: normalizeString(entry.spawnedBy),
       sessionFile: normalizeString(entry.sessionFile),
+      modelProviderId,
+      modelId,
+      authProfileId,
+      authProfileIdSource,
     };
   } catch (error) {
     return {

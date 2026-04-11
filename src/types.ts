@@ -39,6 +39,10 @@ export type SessionRoute = {
   threadId?: string;
   spawnedBy?: string;
   sessionFile?: string;
+  modelProviderId?: string;
+  modelId?: string;
+  authProfileId?: string;
+  authProfileIdSource?: "auto" | "user";
   error?: string;
 };
 
