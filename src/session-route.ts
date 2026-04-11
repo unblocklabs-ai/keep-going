@@ -63,7 +63,7 @@ export function resolveSessionRoute(
     const baseSessionKey = resolveBaseSessionKey(params.sessionKey);
     const entry = store[params.sessionKey] ?? (baseSessionKey !== params.sessionKey ? store[baseSessionKey] : undefined);
     if (!entry) {
-      return { isSlack: false };
+      return { lookupStatus: "missing-entry", isSlack: false };
     }
 
     const channel =
@@ -77,6 +77,7 @@ export function resolveSessionRoute(
       normalizeThreadId(entry.origin?.threadId);
 
     return {
+      lookupStatus: "ok",
       isSlack: channel === "slack",
       channel,
       to,
@@ -85,7 +86,11 @@ export function resolveSessionRoute(
       spawnedBy: normalizeString(entry.spawnedBy),
       sessionFile: normalizeString(entry.sessionFile),
     };
-  } catch {
-    return { isSlack: false };
+  } catch (error) {
+    return {
+      lookupStatus: "error",
+      isSlack: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }

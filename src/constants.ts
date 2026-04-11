@@ -1,0 +1,2 @@
+export const KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX = "keep-going:";
+export const ONE_SHOT_DEDUPE_MAX_AGE_MS = 10 * 60 * 1000;

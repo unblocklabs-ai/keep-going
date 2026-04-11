@@ -6,6 +6,8 @@ const POSITIVE_PATTERNS = [
   /\bi still need to\b/i,
   /\bstill need to\b/i,
   /\bremaining step\b/i,
+  /\bremaining work\b/i,
+  /\bleft to do\b/i,
   /\bi need to update\b/i,
   /\bi need to run\b/i,
   /\bnext step\b/i,
@@ -14,8 +16,9 @@ const POSITIVE_PATTERNS = [
 
 const COMPLETE_PATTERNS = [
   /\b(task|work|implementation|changes?) (is|are) complete\b/i,
-  /\b(done|finished|complete)\b/i,
-  /\bno further action\b/i,
+  /\b(all done|fully complete|already complete)\b/i,
+  /\bno further action(?: needed)?\b/i,
+  /\bnothing (left|remaining) to do\b/i,
 ];
 
 const BLOCKED_PATTERNS = [
@@ -52,16 +55,15 @@ export function validateContinuation(candidate: ContinuationCandidate): Continua
   const hasCompleteSignal = COMPLETE_PATTERNS.some((pattern) => pattern.test(lastAssistantText));
 
   if (!hasPositiveSignal) {
+    if (hasCompleteSignal) {
+      return {
+        continue: false,
+        reason: "assistant-marked-complete",
+      };
+    }
     return {
       continue: false,
       reason: "no-unfinished-signal",
-    };
-  }
-
-  if (hasCompleteSignal && !/\bnext i need to\b/i.test(lastAssistantText)) {
-    return {
-      continue: false,
-      reason: "assistant-marked-complete",
     };
   }
 

@@ -1,5 +1,6 @@
 import { type OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { resolveKeepGoingConfig } from "./config.js";
+import { KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX } from "./constants.js";
 import { OneShotDedupe } from "./dedupe.js";
 import { launchContinuation } from "./launcher.js";
 import { resolveSessionRoute, isSubagentSessionKey } from "./session-route.js";
@@ -82,6 +83,13 @@ export function registerKeepGoingPlugin(api: OpenClawPluginApi): void {
       return;
     }
 
+    if (candidate.runId.startsWith(KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX)) {
+      logger.debug?.("keep-going skipped: plugin-started continuation run", {
+        runId: candidate.runId,
+      });
+      return;
+    }
+
     if (candidate.trigger === "heartbeat" || candidate.trigger === "cron") {
       logger.debug?.("keep-going skipped: background trigger", {
         runId: candidate.runId,
@@ -102,6 +110,23 @@ export function registerKeepGoingPlugin(api: OpenClawPluginApi): void {
       agentId: ctx.agentId,
       sessionKey: candidate.sessionKey,
     });
+
+    if (route.lookupStatus === "error") {
+      logger.warn("keep-going skipped: session lookup failed", {
+        runId: candidate.runId,
+        sessionKey: candidate.sessionKey,
+        error: route.error,
+      });
+      return;
+    }
+
+    if (route.lookupStatus === "missing-entry") {
+      logger.debug?.("keep-going skipped: session entry missing", {
+        runId: candidate.runId,
+        sessionKey: candidate.sessionKey,
+      });
+      return;
+    }
 
     if (!route.isSlack || !config.channels.includes("slack")) {
       logger.debug?.("keep-going skipped: non-slack session", {
@@ -149,6 +174,7 @@ export function registerKeepGoingPlugin(api: OpenClawPluginApi): void {
     dedupe.record(dedupeKey, {
       createdAt: Date.now(),
       reason: decision.reason,
+      threadId: route.threadId,
     });
 
     try {

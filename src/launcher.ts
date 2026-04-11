@@ -1,12 +1,13 @@
 import crypto from "node:crypto";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
+import { KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX } from "./constants.js";
 import type { LaunchContinuationParams } from "./types.js";
 
 export async function launchContinuation(
   api: OpenClawPluginApi,
   params: LaunchContinuationParams,
 ): Promise<{ followUpRunId: string }> {
-  const followUpRunId = `keep-going:${crypto.randomUUID()}`;
+  const followUpRunId = `${KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX}${crypto.randomUUID()}`;
   const extraSystemPrompt = [
     "A completion validator flagged the previous turn as possibly incomplete.",
     "The validator may be wrong.",

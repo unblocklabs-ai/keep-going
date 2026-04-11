@@ -31,6 +31,7 @@ export type ContinuationDecision = {
 };
 
 export type SessionRoute = {
+  lookupStatus: "ok" | "missing-entry" | "error";
   isSlack: boolean;
   channel?: string;
   to?: string;
@@ -38,6 +39,7 @@ export type SessionRoute = {
   threadId?: string;
   spawnedBy?: string;
   sessionFile?: string;
+  error?: string;
 };
 
 export type LaunchContinuationParams = {
