@@ -1,5 +1,6 @@
 import { normalizeTranscriptMessages, type TranscriptMessage } from "./messages.js";
 import { normalizeString } from "./normalize.js";
+import { callResponsesJsonSchema, resolveLlmApiKey } from "./responses-json-schema.js";
 import type {
   ContinuationCandidate,
   ContinuationDecision,
@@ -7,7 +8,6 @@ import type {
   KeepGoingLlmValidatorConfig,
 } from "./types.js";
 
-const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const VALIDATOR_MAX_OUTPUT_TOKENS = 400;
 
 const CONTINUATION_DECISION_SCHEMA = {
@@ -26,7 +26,18 @@ const VALIDATOR_SYSTEM_PROMPT = [
   "Your job is to decide whether the agent's just-finished turn should immediately continue in a follow-up run.",
   "Return continue=true only when there is clearly remaining actionable work the same agent should do now without waiting for the user.",
   "Return continue=false when the work appears complete, the agent is truly blocked, or the next step requires new user input or approval.",
+  "Anchor your decision to the user's requested end state, not just the assistant's last reply.",
+  "If the assistant has only completed an intermediate step and still owns an obvious next action needed to satisfy the user's request, return continue=true.",
   "If the assistant explicitly states a remaining concrete next step that it should do now, that is strong evidence for continue=true.",
+  "If the assistant just finished an audit, diagnosis, test, or investigation and identified the next repair, implementation, validation, or cleanup step inside the same standing task, default to continue=true.",
+  "Do not require the assistant to explicitly say 'next I will' if the remaining work is already clear from the user's request, the current state, and the assistant's own findings.",
+  "Treat statements like 'I'd patch that next', 'that's the next thing I'd fix', 'the next fix is clear', 'I'm validating', or 'I'm checking' as evidence of unfinished owned work unless the transcript clearly shows that work was delegated away or blocked.",
+  "Do not require a fresh user request when the user is still pursuing the same underlying task and the assistant has enough information to take the next concrete step now.",
+  "Treat polite hedge phrases like 'if you want', 'I can', 'I should', 'I still need to', or 'I'll take that next' as likely incomplete work when the assistant identifies a concrete next step inside the same standing task and does not state a real blocker.",
+  "If the assistant says the result should be tightened, cleaned up, patched, verified, confirmed, or surfaced properly before the task is really done, that is evidence for continue=true even if phrased as an offer.",
+  "If the assistant already delegated the next step to a spawned subagent or child worker, or is waiting on that delegated work, that parent turn should usually be continue=false.",
+  "If the assistant says it already sent a subagent, child worker, or separate worker to do the next step, treat the parent turn as continue=false unless the parent also names a separate concrete step that the parent itself still needs to do now.",
+  "Do not require the user to re-approve a next step that is already implied by the existing task unless the transcript clearly asks the assistant to stop after the current answer.",
   "Do not treat optional future ideas, stretch goals, or vague improvements as incomplete work.",
   "If continue=true, provide a short follow_up_instruction telling the agent what remaining step to do next.",
   "If continue=false, set follow_up_instruction to an empty string.",
@@ -39,20 +50,7 @@ export type LlmValidatorInput = {
   context?: ContinuationValidationContext;
 };
 
-export type LlmValidatorOutput = ContinuationDecision & {
-  validatorModel: string;
-};
-
-type ResponsesApiOutputBlock = {
-  type?: unknown;
-  text?: unknown;
-  refusal?: unknown;
-};
-
-type ResponsesApiOutputItem = {
-  type?: unknown;
-  content?: unknown;
-};
+export type LlmValidatorOutput = ContinuationDecision & { validatorModel: string };
 
 function clipText(value: string, maxChars: number): string {
   if (value.length <= maxChars) {
@@ -74,6 +72,86 @@ function buildCurrentTurnWindow(
     }
   }
   return messages;
+}
+
+function isToolCallLine(value: string): boolean {
+  return /^\[Tool Call: .+\]$/.test(value.trim());
+}
+
+function stripAssistantToolCallNoise(message: TranscriptMessage): TranscriptMessage | undefined {
+  if (message.role !== "assistant") {
+    return message;
+  }
+
+  const cleaned = message.text
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => !isToolCallLine(line))
+    .join("\n")
+    .trim();
+
+  if (!cleaned) {
+    return undefined;
+  }
+
+  return {
+    role: "assistant",
+    text: cleaned,
+  };
+}
+
+function buildRecentContextWithCurrentTurn(
+  sessionMessages: TranscriptMessage[],
+  runMessages: TranscriptMessage[],
+  recentUserMessages: number,
+): TranscriptMessage[] {
+  if (sessionMessages.length === 0) {
+    return runMessages.length > 0 ? runMessages : [];
+  }
+
+  const userIndexes: number[] = [];
+  for (let index = 0; index < sessionMessages.length; index += 1) {
+    if (sessionMessages[index]?.role === "user") {
+      userIndexes.push(index);
+    }
+  }
+
+  if (userIndexes.length === 0) {
+    return runMessages.length > 0 ? runMessages : buildCurrentTurnWindow(sessionMessages, true);
+  }
+
+  const selectedUserIndexes = userIndexes.slice(-Math.max(1, recentUserMessages));
+  const currentTurnStartIndex = selectedUserIndexes[selectedUserIndexes.length - 1] ?? userIndexes[userIndexes.length - 1] ?? 0;
+  const context: TranscriptMessage[] = [];
+
+  for (let index = 0; index < selectedUserIndexes.length - 1; index += 1) {
+    const userIndex = selectedUserIndexes[index] ?? 0;
+    const nextUserIndex = selectedUserIndexes[index + 1] ?? sessionMessages.length;
+    const userMessage = sessionMessages[userIndex];
+    if (userMessage) {
+      context.push(userMessage);
+    }
+
+    let finalAssistant: TranscriptMessage | undefined;
+    for (let inner = nextUserIndex - 1; inner > userIndex; inner -= 1) {
+      const candidate = sessionMessages[inner];
+      if (candidate?.role !== "assistant") {
+        continue;
+      }
+      finalAssistant = stripAssistantToolCallNoise(candidate);
+      if (finalAssistant) {
+        break;
+      }
+    }
+
+    if (finalAssistant) {
+      context.push(finalAssistant);
+    }
+  }
+
+  const currentTurnMessages =
+    runMessages.length > 0 ? runMessages : sessionMessages.slice(currentTurnStartIndex);
+  return [...context, ...currentTurnMessages];
 }
 
 function roleLabel(role: TranscriptMessage["role"]): string {
@@ -115,18 +193,29 @@ function renderTranscriptWindow(
   return kept.join("\n\n").trim();
 }
 
-function buildValidatorPrompt(input: LlmValidatorInput): string {
+export function buildValidatorPrompt(input: LlmValidatorInput): string {
   const runTranscriptMessages = input.context?.runTranscriptMessages ?? [];
-  const messages =
-    input.config.includeCurrentTurnOnly && runTranscriptMessages.length > 0
-      ? runTranscriptMessages
-      : normalizeTranscriptMessages(input.candidate.messages);
-  const turnWindow =
-    input.config.includeCurrentTurnOnly && runTranscriptMessages.length > 0
-      ? runTranscriptMessages
-      : buildCurrentTurnWindow(messages, input.config.includeCurrentTurnOnly);
+  const sessionTranscriptMessages = input.context?.sessionTranscriptMessages ?? [];
+  const candidateTranscriptMessages = normalizeTranscriptMessages(input.candidate.messages);
+  const transcriptSource =
+    sessionTranscriptMessages.length > 0
+      ? sessionTranscriptMessages
+      : runTranscriptMessages.length > 0
+        ? runTranscriptMessages
+        : candidateTranscriptMessages;
+  const transcriptWindow = input.config.includeCurrentTurnOnly
+    ? sessionTranscriptMessages.length > 0
+      ? buildRecentContextWithCurrentTurn(
+          sessionTranscriptMessages,
+          runTranscriptMessages,
+          input.config.recentUserMessages,
+        )
+      : runTranscriptMessages.length > 0
+        ? runTranscriptMessages
+        : buildCurrentTurnWindow(candidateTranscriptMessages, true)
+    : transcriptSource;
   const transcript = renderTranscriptWindow(
-    turnWindow,
+    transcriptWindow,
     input.config.maxMessages,
     input.config.maxChars,
   );
@@ -135,59 +224,15 @@ function buildValidatorPrompt(input: LlmValidatorInput): string {
     "Decide whether the plugin should start a same-session follow-up run for this completed turn.",
     "",
     `Run ID: ${input.candidate.runId}`,
-    `Current turn only: ${input.config.includeCurrentTurnOnly ? "yes" : "no"}`,
+    `Conversation scope: ${
+      input.config.includeCurrentTurnOnly
+        ? `current work plus up to ${input.config.recentUserMessages} recent user turns`
+        : "full available session history"
+    }`,
     "",
     "Transcript:",
     transcript || "[No transcript text available]",
   ].join("\n");
-}
-
-function extractOutputText(responseBody: unknown): string | undefined {
-  if (!responseBody || typeof responseBody !== "object") {
-    return undefined;
-  }
-  const body = responseBody as Record<string, unknown>;
-  const topLevelText = normalizeString(body.output_text);
-  if (topLevelText) {
-    return topLevelText;
-  }
-
-  const output = Array.isArray(body.output) ? (body.output as ResponsesApiOutputItem[]) : [];
-  const blocks: string[] = [];
-  for (const item of output) {
-    const content = Array.isArray(item?.content) ? (item.content as ResponsesApiOutputBlock[]) : [];
-    for (const block of content) {
-      const text = normalizeString(block?.text) ?? normalizeString(block?.refusal);
-      if (text) {
-        blocks.push(text);
-      }
-    }
-  }
-
-  const combined = blocks.join("\n").trim();
-  return combined || undefined;
-}
-
-function extractRefusalText(responseBody: unknown): string | undefined {
-  if (!responseBody || typeof responseBody !== "object") {
-    return undefined;
-  }
-  const body = responseBody as Record<string, unknown>;
-  const output = Array.isArray(body.output) ? (body.output as ResponsesApiOutputItem[]) : [];
-  const refusals: string[] = [];
-  for (const item of output) {
-    const content = Array.isArray(item?.content) ? (item.content as ResponsesApiOutputBlock[]) : [];
-    for (const block of content) {
-      if (block?.type === "refusal") {
-        const refusal = normalizeString(block.refusal);
-        if (refusal) {
-          refusals.push(refusal);
-        }
-      }
-    }
-  }
-  const combined = refusals.join("\n").trim();
-  return combined || undefined;
 }
 
 function normalizeDecision(
@@ -218,91 +263,28 @@ function normalizeDecision(
   };
 }
 
-async function callOpenAiValidator(input: LlmValidatorInput, apiKey: string): Promise<unknown> {
-  const controller = new AbortController();
-  const timeoutMs = input.config.timeoutMs ?? 15_000;
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const response = await fetch(OPENAI_RESPONSES_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: input.config.model,
-        store: false,
-        temperature: input.config.temperature ?? 0,
-        max_output_tokens: VALIDATOR_MAX_OUTPUT_TOKENS,
-        input: [
-          {
-            role: "system",
-            content: [{ type: "input_text", text: VALIDATOR_SYSTEM_PROMPT }],
-          },
-          {
-            role: "user",
-            content: [{ type: "input_text", text: buildValidatorPrompt(input) }],
-          },
-        ],
-        text: {
-          format: {
-            type: "json_schema",
-            name: "keep_going_decision",
-            strict: true,
-            schema: CONTINUATION_DECISION_SCHEMA,
-          },
-        },
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      const responseText = clipText(await response.text(), 1000);
-      throw new Error(
-        `validator request failed with ${response.status} ${response.statusText}: ${responseText}`,
-      );
-    }
-
-    return await response.json();
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-export function resolveLlmValidatorApiKey(
-  config: KeepGoingLlmValidatorConfig,
-): string | undefined {
-  const inlineApiKey = config.apiKey?.trim();
-  if (inlineApiKey) {
-    return inlineApiKey;
-  }
-
-  const envKeyName = config.apiKeyEnv?.trim();
-  if (!envKeyName) {
-    return undefined;
-  }
-
-  const envValue = process.env[envKeyName];
-  return typeof envValue === "string" && envValue.trim() ? envValue.trim() : undefined;
-}
-
 export async function validateContinuationWithLlm(
   input: LlmValidatorInput,
 ): Promise<LlmValidatorOutput> {
-  if (input.config.provider !== "openai") {
-    throw new Error(`unsupported llm validator provider: ${input.config.provider}`);
-  }
-
-  const apiKey = resolveLlmValidatorApiKey(input.config);
+  const apiKey = resolveLlmApiKey(input.config);
   if (!apiKey) {
     throw new Error(
       `missing OpenAI API key for validator; set ${input.config.apiKeyEnv ?? "an apiKey"}`
     );
   }
 
-  const responseBody = await callOpenAiValidator(input, apiKey);
-  const refusal = extractRefusalText(responseBody);
+  const response = await callResponsesJsonSchema(
+    {
+      config: input.config,
+      systemPrompt: VALIDATOR_SYSTEM_PROMPT,
+      userPrompt: buildValidatorPrompt(input),
+      schemaName: "keep_going_decision",
+      schema: CONTINUATION_DECISION_SCHEMA,
+      maxOutputTokens: VALIDATOR_MAX_OUTPUT_TOKENS,
+    },
+    apiKey,
+  );
+  const refusal = response.refusal;
   if (refusal) {
     return {
       continue: false,
@@ -311,7 +293,7 @@ export async function validateContinuationWithLlm(
     };
   }
 
-  const outputText = extractOutputText(responseBody);
+  const outputText = response.outputText;
   if (!outputText) {
     throw new Error("validator response did not include output text");
   }

@@ -1,3 +1,7 @@
+import {
+  createOpenAiValidatorConfig,
+  DEFAULT_OPENAI_API_KEY_ENV,
+} from "./openai-validator-config.js";
 import type { KeepGoingPluginConfig } from "./types.js";
 
 const DEFAULT_CONFIG: KeepGoingPluginConfig = {
@@ -8,16 +12,15 @@ const DEFAULT_CONFIG: KeepGoingPluginConfig = {
     heuristic: {
       enabled: true,
     },
-    llm: {
-      provider: "openai",
-      model: "gpt-5.4-mini",
-      apiKeyEnv: "KEEP_GOING_OPENAI_API_KEY",
+    llm: createOpenAiValidatorConfig({
       maxMessages: 10,
       maxChars: 20_000,
       includeCurrentTurnOnly: true,
+      recentUserMessages: 3,
       temperature: 0,
       timeoutMs: 15_000,
-    },
+      apiKeyEnv: DEFAULT_OPENAI_API_KEY_ENV,
+    }),
   },
 };
 
@@ -78,8 +81,7 @@ export function resolveKeepGoingConfig(raw: unknown): KeepGoingPluginConfig {
           DEFAULT_CONFIG.validator.heuristic.enabled,
         ),
       },
-      llm: {
-        provider: "openai",
+      llm: createOpenAiValidatorConfig({
         model:
           typeof validatorLlm.model === "string" && validatorLlm.model.trim()
             ? validatorLlm.model.trim()
@@ -102,6 +104,9 @@ export function resolveKeepGoingConfig(raw: unknown): KeepGoingPluginConfig {
           validatorLlm.includeCurrentTurnOnly,
           DEFAULT_CONFIG.validator.llm.includeCurrentTurnOnly,
         ),
+        recentUserMessages:
+          normalizePositiveInteger(validatorLlm.recentUserMessages) ??
+          DEFAULT_CONFIG.validator.llm.recentUserMessages,
         temperature:
           typeof validatorLlm.temperature === "number" && Number.isFinite(validatorLlm.temperature)
             ? validatorLlm.temperature
@@ -109,7 +114,7 @@ export function resolveKeepGoingConfig(raw: unknown): KeepGoingPluginConfig {
         timeoutMs:
           normalizePositiveInteger(validatorLlm.timeoutMs) ??
           DEFAULT_CONFIG.validator.llm.timeoutMs,
-      },
+      }),
     },
   };
 }

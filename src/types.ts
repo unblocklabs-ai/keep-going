@@ -1,17 +1,19 @@
 export type KeepGoingValidatorMode = "heuristic" | "llm";
+export type KeepGoingLlmValidatorProvider = "openai";
 
 export type KeepGoingHeuristicValidatorConfig = {
   enabled: boolean;
 };
 
 export type KeepGoingLlmValidatorConfig = {
-  provider: "openai";
+  provider: KeepGoingLlmValidatorProvider;
   model: string;
   apiKey?: string;
   apiKeyEnv?: string;
   maxMessages: number;
   maxChars: number;
   includeCurrentTurnOnly: boolean;
+  recentUserMessages: number;
   temperature?: number;
   timeoutMs?: number;
 };
@@ -52,6 +54,7 @@ export type ContinuationDecision = {
 
 export type ContinuationValidationContext = {
   runTranscriptMessages?: import("./messages.js").TranscriptMessage[];
+  sessionTranscriptMessages?: import("./messages.js").TranscriptMessage[];
 };
 
 export type SessionRoute = {
@@ -66,7 +69,6 @@ export type SessionRoute = {
   modelProviderId?: string;
   modelId?: string;
   authProfileId?: string;
-  authProfileIdSource?: "auto" | "user";
   error?: string;
 };
 

@@ -41,7 +41,6 @@ export async function launchContinuation(
     provider,
     model,
     authProfileId: params.sessionRoute.authProfileId,
-    authProfileIdSource: params.sessionRoute.authProfileIdSource,
     timeoutMs: params.timeoutMs,
     runId: followUpRunId,
     trigger: "manual",

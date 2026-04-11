@@ -3,11 +3,10 @@ import { normalizeTrackingSessionKey } from "./session-route.js";
 
 type ActiveChildRecord = {
   childSessionKey: string;
-  runId?: string;
   createdAt: number;
 };
 
-const STALE_ACTIVE_SUBAGENT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const STALE_ACTIVE_SUBAGENT_MAX_AGE_MS = 30 * 60 * 1000;
 
 export class ActiveSubagentTracker {
   private readonly activeByRequesterSessionKey = new Map<string, Map<string, ActiveChildRecord>>();
@@ -15,7 +14,6 @@ export class ActiveSubagentTracker {
   markSpawned(params: {
     requesterSessionKey?: string;
     childSessionKey?: string;
-    runId?: string;
   }): void {
     this.pruneStaleChildren(Date.now());
     const requesterSessionKey = normalizeRequesterKey(params.requesterSessionKey);
@@ -32,7 +30,6 @@ export class ActiveSubagentTracker {
 
     children.set(childSessionKey, {
       childSessionKey,
-      runId: normalizeString(params.runId),
       createdAt: Date.now(),
     });
   }
@@ -40,23 +37,15 @@ export class ActiveSubagentTracker {
   markEnded(params: {
     requesterSessionKey?: string;
     childSessionKey?: string;
-    runId?: string;
   }): void {
     this.pruneStaleChildren(Date.now());
-    const childSessionKey = normalizeString(params.childSessionKey);
-    if (!childSessionKey) {
-      return;
-    }
-
     const requesterSessionKey = normalizeRequesterKey(params.requesterSessionKey);
-    if (requesterSessionKey) {
-      this.deleteChild(requesterSessionKey, childSessionKey, normalizeString(params.runId));
+    const childSessionKey = normalizeString(params.childSessionKey);
+    if (!requesterSessionKey || !childSessionKey) {
       return;
     }
 
-    for (const [key] of this.activeByRequesterSessionKey) {
-      this.deleteChild(key, childSessionKey, normalizeString(params.runId));
-    }
+    this.deleteChild(requesterSessionKey, childSessionKey);
   }
 
   hasActiveChildren(requesterSessionKey?: string): boolean {
@@ -79,17 +68,10 @@ export class ActiveSubagentTracker {
     return children ? Array.from(children.keys()).sort() : [];
   }
 
-  private deleteChild(requesterSessionKey: string, childSessionKey: string, runId?: string): void {
+  private deleteChild(requesterSessionKey: string, childSessionKey: string): void {
     const children = this.activeByRequesterSessionKey.get(requesterSessionKey);
     if (!children) {
       return;
-    }
-
-    if (runId) {
-      const existing = children.get(childSessionKey);
-      if (existing?.runId && existing.runId !== runId) {
-        return;
-      }
     }
 
     children.delete(childSessionKey);

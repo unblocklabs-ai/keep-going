@@ -18,6 +18,14 @@
     "agent",
     "continuation"
   ],
+  "scripts": {
+    "test": "node --import ../openclaw/node_modules/tsx/dist/loader.mjs --test tests/**/*.test.ts",
+    "eval:validator": "node --import ../openclaw/node_modules/tsx/dist/loader.mjs ./scripts/eval-validator.ts",
+    "replay:session": "node --import ../openclaw/node_modules/tsx/dist/loader.mjs ./scripts/replay-session.ts",
+    "export:truth-table": "node --import ../openclaw/node_modules/tsx/dist/loader.mjs ./scripts/export-truth-table.ts",
+    "label:truth-table": "node --import ../openclaw/node_modules/tsx/dist/loader.mjs ./scripts/label-truth-table.ts",
+    "clean:session": "node --import ../openclaw/node_modules/tsx/dist/loader.mjs ./scripts/clean-session.ts"
+  },
   "files": [
     "index.ts",
     "src",

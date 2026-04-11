@@ -104,7 +104,6 @@ The validator config is plugin-local and model-swappable so judge evals are easy
   "validator": {
     "mode": "llm",
     "llm": {
-      "provider": "openai",
       "model": "gpt-5.4-mini",
       "apiKeyEnv": "KEEP_GOING_OPENAI_API_KEY",
       "maxMessages": 10,
@@ -154,7 +153,6 @@ The plugin exposes a small config surface through `openclaw.plugin.json`:
   "validator": {
     "mode": "llm",
     "llm": {
-      "provider": "openai",
       "model": "gpt-5.4-mini",
       "apiKeyEnv": "KEEP_GOING_OPENAI_API_KEY",
       "maxMessages": 10,
@@ -193,3 +191,23 @@ The goal is to answer one question with real usage data:
 Phase 1 answer was yes: the post-turn same-session continuation architecture works in practice.
 
 Phase 2 answer is now testable: the validator can be switched from heuristic to direct LLM judgment without changing the Turn B runtime path.
+
+## Local Validator Eval
+
+For quick local judge evals against a real transcript fixture:
+
+1. Copy `.env.example` to `.env`
+2. set `KEEP_GOING_OPENAI_API_KEY`
+3. optionally set `KEEP_GOING_VALIDATOR_MODEL`
+4. run:
+
+```bash
+npm run eval:validator -- --file 42c136e7-6ba6-42e3-afd1-485aa6a99832-topic-1775879458.009949.jsonl --run latest --print-prompt
+```
+
+Notes:
+
+- the eval runner reads `.env` locally
+- it splits a JSONL transcript into completed run segments using `openclaw:bootstrap-context:full`
+- `--run latest` is the default
+- the output is a compact JSON decision plus an optional prompt preview

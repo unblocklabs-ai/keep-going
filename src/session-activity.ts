@@ -19,11 +19,13 @@ type TranscriptUpdate = {
 };
 
 const STALE_RUN_STATE_MAX_AGE_MS = 5 * 60 * 1000;
+const MAX_SESSION_TRANSCRIPT_MESSAGES = 200;
 
 export class SessionActivityTracker {
   private readonly activeRunIdsBySessionKey = new Map<string, Set<string>>();
   private readonly sessionKeyByRunId = new Map<string, string>();
   private readonly transcriptMessagesByRunId = new Map<string, TranscriptMessage[]>();
+  private readonly transcriptMessagesBySessionKey = new Map<string, TranscriptMessage[]>();
   private readonly transcriptBySessionKey = new Map<string, ActivitySnapshot>();
   private readonly transcriptBySessionFile = new Map<string, ActivitySnapshot>();
   private readonly endedRunAtByRunId = new Map<string, number>();
@@ -87,15 +89,17 @@ export class SessionActivityTracker {
     this.pruneStaleRunState(Date.now());
     const sessionKey = normalizeSessionKey(update.sessionKey);
     if (sessionKey && update.message !== undefined) {
+      const normalizedMessages = normalizeTranscriptMessages([update.message]);
+      if (normalizedMessages.length > 0) {
+        this.appendSessionTranscriptMessages(sessionKey, normalizedMessages);
+      }
+
       const activeRunIds = this.activeRunIdsBySessionKey.get(sessionKey);
-      if (activeRunIds && activeRunIds.size > 0) {
-        const normalizedMessages = normalizeTranscriptMessages([update.message]);
-        if (normalizedMessages.length > 0) {
-          for (const runId of activeRunIds) {
-            const existing = this.transcriptMessagesByRunId.get(runId) ?? [];
-            existing.push(...normalizedMessages);
-            this.transcriptMessagesByRunId.set(runId, existing);
-          }
+      if (activeRunIds && activeRunIds.size > 0 && normalizedMessages.length > 0) {
+        for (const runId of activeRunIds) {
+          const existing = this.transcriptMessagesByRunId.get(runId) ?? [];
+          existing.push(...normalizedMessages);
+          this.transcriptMessagesByRunId.set(runId, existing);
         }
       }
     }
@@ -154,6 +158,15 @@ export class SessionActivityTracker {
     return [...(this.transcriptMessagesByRunId.get(key) ?? [])];
   }
 
+  getSessionTranscriptMessages(sessionKey?: string): TranscriptMessage[] {
+    this.pruneStaleRunState(Date.now());
+    const key = normalizeSessionKey(sessionKey);
+    if (!key) {
+      return [];
+    }
+    return [...(this.transcriptMessagesBySessionKey.get(key) ?? [])];
+  }
+
   clearRun(runId?: string): void {
     const key = normalizeString(runId);
     if (!key) {
@@ -183,6 +196,19 @@ export class SessionActivityTracker {
       this.transcriptMessagesByRunId.delete(runId);
       this.endedRunAtByRunId.delete(runId);
     }
+  }
+
+  private appendSessionTranscriptMessages(
+    sessionKey: string,
+    normalizedMessages: TranscriptMessage[],
+  ): void {
+    const existing = this.transcriptMessagesBySessionKey.get(sessionKey) ?? [];
+    existing.push(...normalizedMessages);
+    const trimmed =
+      existing.length > MAX_SESSION_TRANSCRIPT_MESSAGES
+        ? existing.slice(-MAX_SESSION_TRANSCRIPT_MESSAGES)
+        : existing;
+    this.transcriptMessagesBySessionKey.set(sessionKey, trimmed);
   }
 }
 

@@ -2,15 +2,12 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { normalizeString, normalizeThreadId } from "./normalize.js";
 import type { SessionRoute } from "./types.js";
 
-type SessionEntry = {
+export type SessionRouteEntry = {
   sessionFile?: string;
   spawnedBy?: string;
   modelProvider?: string;
   model?: string;
-  providerOverride?: string;
-  modelOverride?: string;
   authProfileOverride?: string;
-  authProfileOverrideSource?: "auto" | "user";
   deliveryContext?: {
     channel?: string;
     to?: string;
@@ -21,10 +18,33 @@ type SessionEntry = {
   lastTo?: string;
   lastAccountId?: string;
   lastThreadId?: string | number;
-  origin?: {
-    threadId?: string | number;
-  };
 };
+
+export function buildSessionRouteFields(
+  entry: SessionRouteEntry,
+): Omit<SessionRoute, "lookupStatus"> {
+  const channel =
+    normalizeString(entry.deliveryContext?.channel) ?? normalizeString(entry.lastChannel);
+  const to = normalizeString(entry.deliveryContext?.to) ?? normalizeString(entry.lastTo);
+  const accountId =
+    normalizeString(entry.deliveryContext?.accountId) ?? normalizeString(entry.lastAccountId);
+  const threadId =
+    normalizeThreadId(entry.deliveryContext?.threadId) ??
+    normalizeThreadId(entry.lastThreadId);
+
+  return {
+    isSlack: channel === "slack",
+    channel,
+    to,
+    accountId,
+    threadId,
+    spawnedBy: normalizeString(entry.spawnedBy),
+    sessionFile: normalizeString(entry.sessionFile),
+    modelProviderId: normalizeString(entry.modelProvider),
+    modelId: normalizeString(entry.model),
+    authProfileId: normalizeString(entry.authProfileOverride),
+  };
+}
 
 export function resolveBaseSessionKey(sessionKey: string): string {
   const marker = ":thread:";
@@ -51,44 +71,21 @@ export function resolveSessionRoute(
     const storePath = api.runtime.agent.session.resolveStorePath(api.config.session?.store, {
       agentId: params.agentId,
     });
-    const store = api.runtime.agent.session.loadSessionStore(storePath) as Record<string, SessionEntry>;
+    const store = api.runtime.agent.session.loadSessionStore(storePath) as Record<
+      string,
+      SessionRouteEntry
+    >;
     const baseSessionKey = resolveBaseSessionKey(params.sessionKey);
-    const entry = store[params.sessionKey] ?? (baseSessionKey !== params.sessionKey ? store[baseSessionKey] : undefined);
+    const entry =
+      store[params.sessionKey] ??
+      (baseSessionKey !== params.sessionKey ? store[baseSessionKey] : undefined);
     if (!entry) {
       return { lookupStatus: "missing-entry", isSlack: false };
     }
 
-    const channel =
-      normalizeString(entry.deliveryContext?.channel) ?? normalizeString(entry.lastChannel);
-    const to = normalizeString(entry.deliveryContext?.to) ?? normalizeString(entry.lastTo);
-    const accountId =
-      normalizeString(entry.deliveryContext?.accountId) ?? normalizeString(entry.lastAccountId);
-    const threadId =
-      normalizeThreadId(entry.deliveryContext?.threadId) ??
-      normalizeThreadId(entry.lastThreadId) ??
-      normalizeThreadId(entry.origin?.threadId);
-    const modelProviderId =
-      normalizeString(entry.modelProvider) ?? normalizeString(entry.providerOverride);
-    const modelId = normalizeString(entry.model) ?? normalizeString(entry.modelOverride);
-    const authProfileId = normalizeString(entry.authProfileOverride);
-    const authProfileIdSource =
-      authProfileId && entry.authProfileOverrideSource
-        ? entry.authProfileOverrideSource
-        : undefined;
-
     return {
       lookupStatus: "ok",
-      isSlack: channel === "slack",
-      channel,
-      to,
-      accountId,
-      threadId,
-      spawnedBy: normalizeString(entry.spawnedBy),
-      sessionFile: normalizeString(entry.sessionFile),
-      modelProviderId,
-      modelId,
-      authProfileId,
-      authProfileIdSource,
+      ...buildSessionRouteFields(entry),
     };
   } catch (error) {
     return {

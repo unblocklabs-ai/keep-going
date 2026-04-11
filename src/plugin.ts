@@ -64,24 +64,6 @@ type EvaluatedDecision = {
   validatorModel?: string;
 };
 
-type SkipDecision = {
-  reason: string;
-  metadata?: Record<string, unknown>;
-};
-
-type CandidateGuardInput = {
-  candidate: ContinuationCandidate;
-  activeSubagents: ActiveSubagentTracker;
-};
-
-type RouteGuardInput = {
-  candidate: ContinuationCandidate;
-  config: KeepGoingPluginConfig;
-  route: SessionRoute & { lookupStatus: "ok" };
-};
-
-type CandidateGuard = (input: CandidateGuardInput) => SkipDecision | undefined;
-type RouteGuard = (input: RouteGuardInput) => SkipDecision | undefined;
 type ResolvedSessionRoute = SessionRoute & { lookupStatus: "ok" };
 
 function normalizeTimeoutMs(
@@ -127,119 +109,99 @@ function logSkip(
   logger.debug?.(`keep-going skipped: ${reason}`, metadata);
 }
 
-const CANDIDATE_GUARDS: CandidateGuard[] = [
-  ({ candidate }) =>
-    candidate.success ? undefined : { reason: "unsuccessful run", metadata: { runId: candidate.runId } },
-  ({ candidate }) =>
-    lastAssistantHasSubagentSpawnToolCall(candidate.messages)
-      ? {
-          reason: "subagent handoff run",
-          metadata: {
-            runId: candidate.runId,
-            sessionKey: candidate.sessionKey,
-          },
-        }
-      : undefined,
-  ({ candidate, activeSubagents }) =>
-    activeSubagents.hasActiveChildren(candidate.sessionKey)
-      ? {
-          reason: "subagent still in flight",
-          metadata: {
-            runId: candidate.runId,
-            sessionKey: candidate.sessionKey,
-            activeChildSessionKeys: activeSubagents.getActiveChildSessionKeys(candidate.sessionKey),
-          },
-        }
-      : undefined,
-  ({ candidate }) =>
-    candidate.runId.startsWith(KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX)
-      ? {
-          reason: "plugin-started continuation run",
-          metadata: { runId: candidate.runId },
-        }
-      : undefined,
-  ({ candidate }) =>
-    candidate.trigger === "heartbeat" || candidate.trigger === "cron"
-      ? {
-          reason: "background trigger",
-          metadata: {
-            runId: candidate.runId,
-            trigger: candidate.trigger,
-          },
-        }
-      : undefined,
-  ({ candidate }) =>
-    isSubagentSessionKey(candidate.sessionKey)
-      ? {
-          reason: "subagent session key",
-          metadata: {
-            runId: candidate.runId,
-            sessionKey: candidate.sessionKey,
-          },
-        }
-      : undefined,
-];
-
-const ROUTE_GUARDS: RouteGuard[] = [
-  ({ candidate, config, route }) =>
-    !route.isSlack || !config.channels.includes("slack")
-      ? {
-          reason: "non-slack session",
-          metadata: {
-            runId: candidate.runId,
-            channel: route.channel,
-          },
-        }
-      : undefined,
-  ({ candidate, route }) =>
-    route.spawnedBy
-      ? {
-          reason: "spawned session",
-          metadata: {
-            runId: candidate.runId,
-            sessionKey: candidate.sessionKey,
-            spawnedBy: route.spawnedBy,
-          },
-        }
-      : undefined,
-];
-
-function runGuards<TInput>(
-  guards: Array<(input: TInput) => SkipDecision | undefined>,
-  input: TInput,
-): SkipDecision | undefined {
-  for (const guard of guards) {
-    const result = guard(input);
-    if (result) {
-      return result;
-    }
-  }
-  return undefined;
-}
-
 function isResolvedSessionRoute(route: SessionRoute): route is ResolvedSessionRoute {
   return route.lookupStatus === "ok";
 }
 
-function recordLifecyclePhase(
-  sessionActivity: SessionActivityTracker,
-  params: {
-    phase: "start" | "end";
-    sessionKey?: string;
-    runId?: string;
-  },
-): void {
-  if (params.phase === "start") {
-    sessionActivity.markRunStarted({
-      sessionKey: params.sessionKey,
-      runId: params.runId,
-    });
-    return;
+function getCandidateSkip(
+  candidate: ContinuationCandidate,
+  activeSubagents: ActiveSubagentTracker,
+): { reason: string; metadata?: Record<string, unknown> } | undefined {
+  if (!candidate.success) {
+    return {
+      reason: "unsuccessful run",
+      metadata: { runId: candidate.runId },
+    };
   }
-  sessionActivity.markRunEnded({
-    sessionKey: params.sessionKey,
-    runId: params.runId,
-  });
+
+  if (lastAssistantHasSubagentSpawnToolCall(candidate.messages)) {
+    return {
+      reason: "subagent handoff run",
+      metadata: {
+        runId: candidate.runId,
+        sessionKey: candidate.sessionKey,
+      },
+    };
+  }
+
+  if (activeSubagents.hasActiveChildren(candidate.sessionKey)) {
+    return {
+      reason: "subagent still in flight",
+      metadata: {
+        runId: candidate.runId,
+        sessionKey: candidate.sessionKey,
+        activeChildSessionKeys: activeSubagents.getActiveChildSessionKeys(candidate.sessionKey),
+      },
+    };
+  }
+
+  if (candidate.runId.startsWith(KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX)) {
+    return {
+      reason: "plugin-started continuation run",
+      metadata: { runId: candidate.runId },
+    };
+  }
+
+  if (candidate.trigger === "heartbeat" || candidate.trigger === "cron") {
+    return {
+      reason: "background trigger",
+      metadata: {
+        runId: candidate.runId,
+        trigger: candidate.trigger,
+      },
+    };
+  }
+
+  if (isSubagentSessionKey(candidate.sessionKey)) {
+    return {
+      reason: "subagent session key",
+      metadata: {
+        runId: candidate.runId,
+        sessionKey: candidate.sessionKey,
+      },
+    };
+  }
+
+  return undefined;
+}
+
+function getRouteSkip(
+  candidate: ContinuationCandidate,
+  config: KeepGoingPluginConfig,
+  route: ResolvedSessionRoute,
+): { reason: string; metadata?: Record<string, unknown> } | undefined {
+  if (!route.isSlack || !config.channels.includes("slack")) {
+    return {
+      reason: "non-slack session",
+      metadata: {
+        runId: candidate.runId,
+        channel: route.channel,
+      },
+    };
+  }
+
+  if (route.spawnedBy) {
+    return {
+      reason: "spawned session",
+      metadata: {
+        runId: candidate.runId,
+        sessionKey: candidate.sessionKey,
+        spawnedBy: route.spawnedBy,
+      },
+    };
+  }
+
+  return undefined;
 }
 
 function resolveEligibleContinuationContext(
@@ -255,10 +217,7 @@ function resolveEligibleContinuationContext(
     return undefined;
   }
 
-  const candidateSkip = runGuards(CANDIDATE_GUARDS, {
-    candidate,
-    activeSubagents,
-  });
+  const candidateSkip = getCandidateSkip(candidate, activeSubagents);
   if (candidateSkip) {
     logSkip(logger, candidateSkip.reason, candidateSkip.metadata);
     return undefined;
@@ -290,11 +249,7 @@ function resolveEligibleContinuationContext(
     return undefined;
   }
 
-  const routeSkip = runGuards(ROUTE_GUARDS, {
-    candidate,
-    config,
-    route,
-  });
+  const routeSkip = getRouteSkip(candidate, config, route);
   if (routeSkip) {
     logSkip(logger, routeSkip.reason, routeSkip.metadata);
     return undefined;
@@ -344,6 +299,9 @@ async function evaluateDecision(
           config: config.validator.llm,
           context: {
             runTranscriptMessages: sessionActivity.getRunTranscriptMessages(candidate.runId),
+            sessionTranscriptMessages: sessionActivity.getSessionTranscriptMessages(
+              candidate.sessionKey,
+            ),
           },
         });
         return {
@@ -355,7 +313,6 @@ async function evaluateDecision(
           runId: candidate.runId,
           sessionKey: candidate.sessionKey,
           model: config.validator.llm.model,
-          provider: config.validator.llm.provider,
           error: error instanceof Error ? error.message : String(error),
         });
         return undefined;
@@ -482,30 +439,16 @@ export function registerKeepGoingPlugin(api: OpenClawPluginApi): void {
       return;
     }
     const phase = typeof event.data?.phase === "string" ? event.data.phase : undefined;
-    switch (phase) {
-      case "start":
-        recordLifecyclePhase(runtime.sessionActivity, {
-          phase: "start",
-          sessionKey: event.sessionKey,
-          runId: event.runId,
-        });
-        break;
-      case "end":
-      case "error":
-        recordLifecyclePhase(runtime.sessionActivity, {
-          phase: "end",
-          sessionKey: event.sessionKey,
-          runId: event.runId,
-        });
-        break;
-      default:
-        break;
+    if (phase === "error") {
+      runtime.sessionActivity.markRunEnded({
+        sessionKey: event.sessionKey,
+        runId: event.runId,
+      });
     }
   });
 
   api.on("before_agent_start", (_event, ctx) => {
-    recordLifecyclePhase(runtime.sessionActivity, {
-      phase: "start",
+    runtime.sessionActivity.markRunStarted({
       sessionKey: ctx.sessionKey,
       runId: ctx.runId,
     });
@@ -515,7 +458,6 @@ export function registerKeepGoingPlugin(api: OpenClawPluginApi): void {
     runtime.activeSubagents.markSpawned({
       requesterSessionKey: ctx.requesterSessionKey,
       childSessionKey: event.childSessionKey,
-      runId: event.runId,
     });
   });
 
@@ -526,13 +468,11 @@ export function registerKeepGoingPlugin(api: OpenClawPluginApi): void {
     runtime.activeSubagents.markEnded({
       requesterSessionKey: ctx.requesterSessionKey,
       childSessionKey: event.targetSessionKey,
-      runId: event.runId,
     });
   });
 
   api.on("agent_end", async (event, ctx) => {
-    recordLifecyclePhase(runtime.sessionActivity, {
-      phase: "end",
+    runtime.sessionActivity.markRunEnded({
       sessionKey: ctx.sessionKey,
       runId: ctx.runId,
     });
