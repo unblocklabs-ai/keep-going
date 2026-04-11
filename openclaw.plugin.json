@@ -1,0 +1,33 @@
+{
+  "id": "keep-going",
+  "name": "Keep Going",
+  "description": "Prototype plugin scaffold for continuation validation experiments",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "channels": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "timeoutMs": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "heuristic": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

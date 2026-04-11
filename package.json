@@ -1,0 +1,23 @@
+{
+  "name": "@bek/openclaw-keep-going",
+  "version": "0.0.0",
+  "private": true,
+  "description": "OpenClaw plugin scaffold for continuation experiments",
+  "type": "module",
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.4.9",
+      "minGatewayVersion": "2026.4.9"
+    },
+    "build": {
+      "openclawVersion": "2026.4.9",
+      "pluginSdkVersion": "2026.4.9"
+    }
+  }
+}
