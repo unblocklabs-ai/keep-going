@@ -1,38 +1,81 @@
 # Keep Going
 
-`keep-going` is a local OpenClaw plugin scaffold for experimenting with post-turn continuation logic.
+`keep-going` is a native OpenClaw plugin for Slack-first continuation experiments.
 
-## Goal
+Its job is simple:
 
-The intended behavior is:
+- let Turn A finish normally
+- inspect the completed run after `agent_end`
+- if the turn appears unfinished, launch one advisory Turn B on the same session and Slack thread
+- let the main agent disagree with the nudge if it is actually done or blocked
 
-- an agent finishes turn A
-- the plugin inspects the completed turn
-- if the work appears unfinished, the plugin can trigger a follow-up run B on the same session
-- the main agent can still ignore the nudge if it is actually done or blocked
+## Remote Install
 
-This is intentionally separate from OpenClaw core so the behavior can be tested locally without waiting on upstream changes.
+This repo is set up as its own OpenClaw marketplace, so a public remote install is one command:
 
-## Current State
+```bash
+openclaw plugins install keep-going --marketplace unblocklabs-ai/keep-going
+openclaw plugins enable keep-going
+```
 
-This directory is only a boilerplate native plugin package.
+Then restart the OpenClaw gateway or process and verify:
 
-- `package.json` exposes `./index.ts` through `openclaw.extensions`
-- `package.json` includes `compat` and `build` metadata for OpenClaw `2026.4.9`
-- `openclaw.plugin.json` provides the required native plugin manifest and empty config schema
-- `index.ts` registers an empty plugin entry
-- no hooks, services, commands, or runtime logic are implemented yet
+```bash
+openclaw plugins list --enabled
+openclaw plugins inspect keep-going
+```
 
-## Planned Shape
+## Local Install
 
-Likely implementation areas for later:
+For local iteration:
 
-- subscribe to a turn-complete or agent-message-adjacent event
-- inspect the final assistant output plus current-turn tool activity
-- decide whether the turn is actually complete
-- optionally enqueue a follow-up run on the same session
-- record metrics so prompt and policy changes can be evaluated
+```bash
+git clone https://github.com/unblocklabs-ai/keep-going.git
+openclaw plugins install --link ./keep-going
+openclaw plugins enable keep-going
+```
 
-## Notes
+## Current Scope
 
-This scaffold is aimed at the native OpenClaw plugin system, not the separate Codex `.codex-plugin` format.
+Current phase-1 behavior is intentionally narrow:
+
+- Slack only
+- top-level sessions only
+- skips `heartbeat` and `cron` runs
+- skips subagent and spawned-session runs
+- uses a cheap heuristic validator
+- launches at most one follow-up Turn B per origin run
+
+The validator is advisory, not authoritative. Turn B is instructed to stop immediately if the previous turn was already complete or truly blocked.
+
+## Plugin Config
+
+The plugin exposes a small config surface through `openclaw.plugin.json`:
+
+```json
+{
+  "enabled": true,
+  "channels": ["slack"],
+  "timeoutMs": 120000,
+  "heuristic": {
+    "enabled": true
+  }
+}
+```
+
+## Repository Notes
+
+- `index.ts` registers the native plugin entry
+- `src/plugin.ts` wires the `agent_end` hook and launch flow
+- `src/validator.ts` contains the phase-1 heuristic
+- `src/session-route.ts` recovers Slack routing from session metadata
+- `src/launcher.ts` launches the advisory continuation turn
+- `plan/` holds the design docs for scope and architecture
+
+## Status
+
+This is an experiment repo, not a polished upstream-ready package yet.
+
+The goal is to answer one question with real usage data:
+
+“Can a post-turn continuation nudge reduce disappointing half-finished async-worker outcomes?”

@@ -1,0 +1,12 @@
+{
+  "name": "Keep Going Marketplace",
+  "version": "0.1.0",
+  "plugins": [
+    {
+      "name": "keep-going",
+      "version": "0.1.0",
+      "description": "Post-turn continuation plugin for Slack-based OpenClaw sessions",
+      "source": "."
+    }
+  ]
+}

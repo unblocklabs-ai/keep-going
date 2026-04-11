@@ -1,9 +1,31 @@
 {
-  "name": "@bek/openclaw-keep-going",
-  "version": "0.0.0",
-  "private": true,
-  "description": "OpenClaw plugin scaffold for continuation experiments",
+  "name": "@unblocklabs-ai/openclaw-keep-going",
+  "version": "0.1.0",
+  "description": "OpenClaw plugin that nudges unfinished agent turns to continue on the same Slack thread",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/unblocklabs-ai/keep-going.git"
+  },
+  "homepage": "https://github.com/unblocklabs-ai/keep-going",
+  "bugs": {
+    "url": "https://github.com/unblocklabs-ai/keep-going/issues"
+  },
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "slack",
+    "agent",
+    "continuation"
+  ],
+  "files": [
+    "index.ts",
+    "src",
+    "plan",
+    "README.md",
+    "openclaw.plugin.json",
+    ".claude-plugin/marketplace.json"
+  ],
   "devDependencies": {
     "@openclaw/plugin-sdk": "workspace:*"
   },
@@ -18,6 +40,10 @@
     "build": {
       "openclawVersion": "2026.4.9",
       "pluginSdkVersion": "2026.4.9"
+    },
+    "release": {
+      "publishToClawHub": false,
+      "publishToNpm": false
     }
   }
 }

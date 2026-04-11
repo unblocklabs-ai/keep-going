@@ -1,7 +1,7 @@
 {
   "id": "keep-going",
   "name": "Keep Going",
-  "description": "Prototype plugin scaffold for continuation validation experiments",
+  "description": "Post-turn continuation plugin for Slack-based OpenClaw sessions",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
