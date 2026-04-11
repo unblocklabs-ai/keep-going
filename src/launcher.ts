@@ -3,6 +3,17 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX } from "./constants.js";
 import type { LaunchContinuationParams } from "./types.js";
 
+export function resolveContinuationSessionFile(
+  api: OpenClawPluginApi,
+  params: Pick<LaunchContinuationParams, "candidate" | "sessionRoute">,
+): string {
+  return api.runtime.agent.session.resolveSessionFilePath(
+    params.candidate.sessionId,
+    params.sessionRoute.sessionFile ? { sessionFile: params.sessionRoute.sessionFile } : undefined,
+    { agentId: params.candidate.agentId },
+  );
+}
+
 export async function launchContinuation(
   api: OpenClawPluginApi,
   params: LaunchContinuationParams,
@@ -23,11 +34,7 @@ export async function launchContinuation(
   await api.runtime.agent.runEmbeddedPiAgent({
     sessionId: params.candidate.sessionId,
     sessionKey: params.candidate.sessionKey,
-    sessionFile: api.runtime.agent.session.resolveSessionFilePath(
-      params.candidate.sessionId,
-      params.sessionRoute.sessionFile ? { sessionFile: params.sessionRoute.sessionFile } : undefined,
-      { agentId: params.candidate.agentId },
-    ),
+    sessionFile: params.sessionFile,
     workspaceDir: params.candidate.workspaceDir,
     config: api.config,
     prompt: "Continue the previous task.",

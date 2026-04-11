@@ -49,8 +49,28 @@ The OpenClaw runtime surface is sufficient for this experiment:
 
 - `agent_end` exists as a plugin hook in `Desktop/unblocked/openclaw/src/plugins/types.ts`
 - trusted native plugins can call `api.runtime.agent.runEmbeddedPiAgent(...)`
+- subagent lifecycle hooks exist, so the plugin can suppress continuation while a child subagent is still in flight
 
 That means the first prototype does not require a core OpenClaw change. It can be built as a local post-turn continuation layer.
+
+### Phase 1 Outcome
+
+Phase 1 validated the core runtime hypothesis.
+
+What is now proven:
+
+- the `agent_end` hook path is sufficient to inspect completed runs without adding latency to Turn A
+- a trusted native plugin can launch an advisory continuation run through `runEmbeddedPiAgent(...)`
+- the continuation can stay on the same OpenClaw session and the same Slack thread
+- the plugin can recover useful unfinished turns in real usage rather than only in theory
+
+What Phase 1 did not change:
+
+- it did not make Turn A itself longer
+- it did not resume the already-finished run
+- it did not turn the plugin into the final arbiter of completion truth
+
+The main lesson from Phase 1 is that the architecture is viable. The next problem is validator precision, not whether post-turn continuation is possible at all.
 
 ### What This Prototype Tests
 
@@ -87,6 +107,19 @@ The real instruction should live in `extraSystemPrompt`, not in a long synthetic
 
 This keeps transcript pollution low while preserving an explicit escape hatch for the agent.
 
+### Same Session, New Run
+
+The continuation mechanism is same-session but not same-run.
+
+That means:
+
+- Turn B is a separate `runEmbeddedPiAgent(...)` invocation
+- Turn B reuses the same `sessionId` and `sessionKey`
+- Turn B should land in the same Slack thread when session routing is resolved correctly
+- Turn A is already over by the time the plugin acts
+
+This distinction matters conceptually. The plugin does not "wake the current turn back up." It starts a new run on the same conversation state after the previous run has ended.
+
 ### First Implementation Shape
 
 The initial prototype should have five parts:
@@ -102,6 +135,7 @@ The `agent_end` hook should:
 - inspect only successful runs
 - require a usable session identity
 - skip any run that has already been retriggered once
+- skip immediate subagent-handoff runs and skip parent sessions that still have an active child subagent
 
 The lightweight validator should:
 
@@ -137,14 +171,24 @@ The `agent_end` context is useful but not exhaustive. It contains enough informa
 
 That is acceptable for this phase. The prototype should be treated as a session-level continuation experiment first, not as a production-complete messaging feature.
 
-### Recommended Rollout
+### Rollout
 
-The prototype should ship in two phases:
+The prototype ships in two phases:
 
 1. code-only continuation trigger
 2. optional LLM-based validator
 
-Phase 1 should detect explicit unfinished language, trigger one advisory Turn B, and collect logs and evaluations. Phase 2 should keep the same post-turn plugin path and swap in an LLM validator so the two approaches can be compared on precision and usefulness.
+Phase 1 detects explicit unfinished language, triggers one advisory Turn B, and collects logs and evaluations. Phase 2 keeps the same post-turn plugin path and swaps in an LLM validator so the two approaches can be compared on precision and usefulness.
+
+Phase 2 should build on the Phase 1 runtime path rather than replacing it. The current plugin wiring is already good enough. The main change should be validator quality.
+
+Phase 2 should not require the phase-1 heuristic as a prerequisite. The LLM validator should be able to act as the primary continuation decision path.
+
+Phase 2 implementation choice:
+
+- the validator calls OpenAI directly with a plugin-scoped API key
+- the validator does not create its own OpenClaw run
+- only Turn B is user-visible
 
 ## Non-Goal
 

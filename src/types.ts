@@ -1,9 +1,29 @@
+export type KeepGoingValidatorMode = "heuristic" | "llm";
+
+export type KeepGoingHeuristicValidatorConfig = {
+  enabled: boolean;
+};
+
+export type KeepGoingLlmValidatorConfig = {
+  provider: "openai";
+  model: string;
+  apiKey?: string;
+  apiKeyEnv?: string;
+  maxMessages: number;
+  maxChars: number;
+  includeCurrentTurnOnly: boolean;
+  temperature?: number;
+  timeoutMs?: number;
+};
+
 export type KeepGoingPluginConfig = {
   enabled: boolean;
   channels: string[];
   timeoutMs?: number;
-  heuristic: {
-    enabled: boolean;
+  validator: {
+    mode: KeepGoingValidatorMode;
+    heuristic: KeepGoingHeuristicValidatorConfig;
+    llm: KeepGoingLlmValidatorConfig;
   };
 };
 
@@ -30,6 +50,10 @@ export type ContinuationDecision = {
   followUpInstruction?: string;
 };
 
+export type ContinuationValidationContext = {
+  runTranscriptMessages?: import("./messages.js").TranscriptMessage[];
+};
+
 export type SessionRoute = {
   lookupStatus: "ok" | "missing-entry" | "error";
   isSlack: boolean;
@@ -50,5 +74,6 @@ export type LaunchContinuationParams = {
   candidate: ContinuationCandidate;
   decision: ContinuationDecision;
   sessionRoute: SessionRoute;
+  sessionFile: string;
   timeoutMs: number;
 };

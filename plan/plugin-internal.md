@@ -22,6 +22,7 @@ Relevant local code:
 - `Desktop/unblocked/openclaw/src/plugins/types.ts`
 - `Desktop/unblocked/openclaw/src/plugins/hooks.ts`
 - `Desktop/unblocked/openclaw/src/plugins/runtime/types-core.ts`
+- `Desktop/unblocked/openclaw/src/plugins/runtime/types.ts`
 - `Desktop/unblocked/openclaw/src/plugins/runtime/runtime-agent.ts`
 - `Desktop/unblocked/openclaw/src/agents/pi-embedded-runner/run/attempt.ts`
 - `Desktop/unblocked/openclaw/src/agents/pi-embedded-runner/run/params.ts`
@@ -141,6 +142,26 @@ This is the correct mechanism for:
 - reusing normal session, tool, hook, and transcript behavior
 
 This is much better than inventing a custom side channel.
+
+### 3. Subagent lifecycle hooks are the right way to know whether a child is still active
+
+Local plugin types confirm:
+
+- `subagent_spawned` and `subagent_ended` are typed hooks in `src/plugins/types.ts`
+- those hooks carry `requesterSessionKey`, `childSessionKey`, and run identity context
+
+Implications for `keep-going`:
+
+- the plugin can maintain a small in-memory map of parent session -> active child sessions
+- `agent_end` can skip continuation while a child subagent is still in flight
+- this should not be inferred from delivery target metadata
+
+Reason:
+
+- delivery target answers "where would a child deliver?"
+- it does not answer "is the child still running?"
+
+So for this plugin, lifecycle hooks are the correct signal and delivery target is not.
 
 ## Runtime Helpers Worth Using
 

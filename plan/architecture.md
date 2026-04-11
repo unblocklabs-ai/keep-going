@@ -30,6 +30,10 @@ Implementation pieces:
 5. one-shot dedupe state
 6. continuation launcher
 
+Cross-cutting runtime guard:
+
+7. active child-subagent tracker
+
 ## Component Breakdown
 
 ### 1. Plugin entry
@@ -40,7 +44,9 @@ Responsibilities:
 - read plugin config
 - create scoped logger
 - initialize in-memory dedupe state
+- initialize in-memory active-child tracking
 - register the `agent_end` hook
+- register subagent lifecycle hooks
 
 This module should stay thin. It should wire dependencies, not contain decision logic.
 
@@ -64,6 +70,8 @@ Early exit checks should include:
 - missing `workspaceDir`
 - `trigger` is `heartbeat` or `cron`
 - session is a subagent session
+- last assistant message handed work to a subagent
+- parent session still has an active child subagent in flight
 - already retriggered for this originating run
 - plugin config disables continuation
 
@@ -84,8 +92,15 @@ Phase 1 validator type:
 Phase 2 validator type:
 
 - optional LLM-based semantic validator behind the same interface
+- implemented as a direct OpenAI API call using a plugin-scoped API key
 
 The validator should not launch anything directly. It only returns a decision.
+
+Phase 2 implementation constraint:
+
+- the validator should not use `runEmbeddedPiAgent(...)`
+- the validator should not create a new OpenClaw run or session
+- the validator should analyze a capped transcript window from the completed run and return a structured decision
 
 ### 4. Session lookup helper
 
@@ -148,6 +163,28 @@ The launcher should also preserve Slack routing and thread context, based on res
 
 The launcher should not attempt to mutate Turn A output or splice itself into the same run. Its job is only to start Turn B.
 
+### 7. Active child-subagent tracker
+
+Responsibilities:
+
+- track child subagent sessions spawned from a parent session
+- suppress continuation while a child is still active
+- clear active state when the child subagent ends
+
+Phase 2 implementation:
+
+- process-local in-memory tracker
+- write on `subagent_spawned`
+- clear on `subagent_ended`
+
+This is a better signal than delivery-target inference. Delivery target tells us where a child might reply, not whether the child is still running.
+
+Operational detail discovered during Phase 1:
+
+- provider, model, and auth continuity must come from session metadata, not from `agent_end` context alone
+
+The reason is that `agent_end` hook context does not currently guarantee the active runtime model/auth selection. Session-store lookup is therefore responsible for carrying the real provider/model/auth profile into Turn B.
+
 ## Primary Flow
 
 ### Turn A completion path
@@ -164,6 +201,10 @@ The launcher should not attempt to mutate Turn A output or splice itself into th
    - stop as already complete
    - stop as blocked
    - continue with the next actionable step
+
+Important clarification:
+
+- Turn B is a new run on the same session, not a resurrection of Turn A
 
 ## Eligibility Rule
 
@@ -216,6 +257,16 @@ Reason:
 - the current user need is Slack-specific
 - Slack thread placement matters for clarity
 - generic channel support would expand the surface area before the continuation mechanism itself is validated
+
+### Loop prevention
+
+Because the plugin starts a new run, the continuation path must not recursively trigger itself.
+
+Phase 1 implementation requirement:
+
+- tag plugin-started runs with a recognizable run id prefix
+- skip any `agent_end` for runs started by the plugin itself
+- still keep one-shot dedupe for originating Turn A runs
 
 ## Turn B Contract
 
@@ -302,15 +353,27 @@ Suggested shape:
 
 ```ts
 type ResolvedSessionRoute = {
+  lookupStatus: "ok" | "missing-entry" | "error";
   channel: "slack";
   to?: string;
   accountId?: string;
   threadId?: string;
   isSlack: boolean;
+  modelProviderId?: string;
+  modelId?: string;
+  authProfileId?: string;
+  authProfileIdSource?: "auto" | "user";
+  error?: string;
 };
 ```
 
 The helper should prefer normalized session-store delivery context over ad hoc reconstruction.
+
+Phase 1 production learning:
+
+- session lookup status should distinguish normal ineligibility from lookup failure
+- model/provider/auth identity should be read from the session entry
+- delivery routing and model/auth continuity belong in the same lookup step
 
 ## Validator Design
 
@@ -344,6 +407,14 @@ That second validator should be introduced only after:
 - phase 1 logs are in place
 - baseline precision is understood
 - there is evidence that heuristic detection misses too many useful continuation cases
+
+Phase 2 design direction:
+
+- the LLM validator should be able to replace the heuristic as the primary gate
+- the heuristic may remain only as a fallback or baseline path
+- the validator call itself should not use `runEmbeddedPiAgent(...)`
+- the validator should be a direct API call so it does not create a new OpenClaw run or session
+- Turn B remains the only actual continuation run
 
 ## Message Extraction Strategy
 
@@ -382,6 +453,45 @@ Suggested defaults:
 
 Phase 1 should not expose many tuning knobs. The plugin needs observability first, not a large config matrix.
 
+### Phase 2 validator config direction
+
+Phase 2 should expose validator selection explicitly in plugin config.
+
+Suggested shape:
+
+```json
+{
+  "enabled": true,
+  "channels": ["slack"],
+  "timeoutMs": 120000,
+  "validator": {
+    "mode": "llm",
+    "llm": {
+      "provider": "openai",
+      "model": "gpt-5.4-mini",
+      "apiKeyEnv": "KEEP_GOING_OPENAI_API_KEY",
+      "maxMessages": 10,
+      "maxChars": 20000,
+      "includeCurrentTurnOnly": true,
+      "temperature": 0,
+      "timeoutMs": 15000
+    }
+  }
+}
+```
+
+Phase 2 auth posture:
+
+- prefer a plugin-scoped OpenAI API key
+- prefer env-var indirection over storing raw secrets directly in `openclaw.json`
+- do not rely on `openai-codex` OAuth for the judge path
+
+Phase 2 context posture:
+
+- start with current-turn-focused context rather than full transcript replay
+- cap both message count and character budget
+- make model choice easily swappable for judge evaluations
+
 ## Logging And Evaluation
 
 The plugin should use a scoped structured logger from `api.runtime.logging.getChildLogger(...)`.
@@ -406,6 +516,10 @@ Useful log fields:
 - follow-up run id when available
 
 These logs are the minimum basis for later evaluation.
+
+Phase 1 operational note:
+
+- plugin logs appear inline in the main gateway log, not in a separate plugin log file
 
 ## Failure Handling
 
@@ -440,7 +554,7 @@ That means:
 - same `sessionId`
 - same `sessionKey`
 - same workspace
-- same model/provider when possible
+- same model/provider/auth when available from session state
 - only top-level non-subagent sessions
 - no heartbeat or cron runs
 - Slack-only routing in phase 1
@@ -480,10 +594,17 @@ Anything larger in phase 1 would mostly be framework, not product learning.
 - hook-only plugin
 - code-only validator
 - session-store route lookup
-- in-memory dedupe
+- in-memory dedupe with bounded pruning
 - one advisory Turn B
 - Slack-only continuation routing
 - structured logs
+
+Phase 1 implementation details now validated:
+
+- plugin-started runs are skipped via run id prefix to prevent recursive Turn C/Turn D chains
+- dedupe is one-shot, process-local, and prunes old entries
+- dedupe replacement on the same Slack thread is acceptable for this phase
+- session store is the source of truth for routing and auth continuity
 
 ### Phase 2
 

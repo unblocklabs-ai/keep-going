@@ -1,4 +1,5 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
+import { normalizeString, normalizeThreadId } from "./normalize.js";
 import type { SessionRoute } from "./types.js";
 
 type SessionEntry = {
@@ -25,32 +26,17 @@ type SessionEntry = {
   };
 };
 
-function normalizeString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-function normalizeThreadId(value: unknown): string | undefined {
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    return trimmed ? trimmed : undefined;
-  }
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return String(value);
-  }
-  return undefined;
-}
-
-function resolveBaseSessionKey(sessionKey: string): string {
+export function resolveBaseSessionKey(sessionKey: string): string {
   const marker = ":thread:";
   const markerIndex = sessionKey.lastIndexOf(marker);
   if (markerIndex < 0) {
     return sessionKey;
   }
   return sessionKey.slice(0, markerIndex);
+}
+
+export function normalizeTrackingSessionKey(sessionKey: string): string {
+  return resolveBaseSessionKey(sessionKey.trim());
 }
 
 export function isSubagentSessionKey(sessionKey: string): boolean {
