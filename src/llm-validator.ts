@@ -1,7 +1,8 @@
 import { normalizeTranscriptMessages, type TranscriptMessage } from "./messages.js";
 import { normalizeString } from "./normalize.js";
+import { resolveLlmApiKey } from "./openai-api-key.js";
 import { OPENAI_VALIDATOR_INTERNAL_DEFAULTS } from "./openai-validator-config.js";
-import { callResponsesJsonSchema, resolveLlmApiKey } from "./responses-json-schema.js";
+import { callResponsesJsonSchema } from "./responses-json-schema.js";
 import type {
   ContinuationCandidate,
   ContinuationDecision,

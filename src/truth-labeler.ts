@@ -1,5 +1,6 @@
+import { resolveLlmApiKey } from "./openai-api-key.js";
 import type { OpenAiLlmCallConfig } from "./types.js";
-import { callResponsesJsonSchema, resolveLlmApiKey } from "./responses-json-schema.js";
+import { callResponsesJsonSchema } from "./responses-json-schema.js";
 
 const TRUTH_LABEL_MAX_OUTPUT_TOKENS = 500;
 
