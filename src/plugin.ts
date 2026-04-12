@@ -48,6 +48,7 @@ type KeepGoingRuntime = {
   dedupe: OneShotDedupe;
   activeSubagents: ActiveSubagentTracker;
   sessionActivity: SessionActivityTracker;
+  deps: KeepGoingDependencies;
 };
 
 type EligibleContinuationContext = {
@@ -64,6 +65,16 @@ type EvaluatedDecision = {
 };
 
 type ResolvedSessionRoute = SessionRoute & { lookupStatus: "ok" };
+
+type KeepGoingDependencies = {
+  validateContinuationWithLlm: typeof validateContinuationWithLlm;
+  launchContinuation: typeof launchContinuation;
+};
+
+const DEFAULT_DEPS: KeepGoingDependencies = {
+  validateContinuationWithLlm,
+  launchContinuation,
+};
 
 function normalizeTimeoutMs(
   api: OpenClawPluginApi,
@@ -288,10 +299,10 @@ async function evaluateDecision(
   runtime: KeepGoingRuntime,
   candidate: ContinuationCandidate,
 ): Promise<EvaluatedDecision | undefined> {
-  const { config, logger, sessionActivity } = runtime;
+  const { config, logger, sessionActivity, deps } = runtime;
 
   try {
-    const decision = await validateContinuationWithLlm({
+    const decision = await deps.validateContinuationWithLlm({
       candidate,
       config: config.validator.llm,
       context: {
@@ -364,7 +375,7 @@ async function launchEligibleContinuation(
   context: EligibleContinuationContext,
   evaluated: EvaluatedDecision,
 ): Promise<void> {
-  const { config, logger, dedupe, api } = runtime;
+  const { config, logger, dedupe, api, deps } = runtime;
   const { candidate, dedupeKey, route, sessionFile } = context;
   const { decision, validatorModel } = evaluated;
 
@@ -375,7 +386,7 @@ async function launchEligibleContinuation(
   });
 
   try {
-    const launchResult = await launchContinuation(api, {
+    const launchResult = await deps.launchContinuation(api, {
       candidate,
       decision,
       sessionRoute: route,
@@ -402,7 +413,10 @@ async function launchEligibleContinuation(
   }
 }
 
-export function registerKeepGoingPlugin(api: OpenClawPluginApi): void {
+export function registerKeepGoingPlugin(
+  api: OpenClawPluginApi,
+  deps: KeepGoingDependencies = DEFAULT_DEPS,
+): void {
   const config = resolveKeepGoingConfig(api.pluginConfig);
   const runtime: KeepGoingRuntime = {
     api,
@@ -411,6 +425,7 @@ export function registerKeepGoingPlugin(api: OpenClawPluginApi): void {
     dedupe: new OneShotDedupe(),
     activeSubagents: new ActiveSubagentTracker(),
     sessionActivity: new SessionActivityTracker(),
+    deps,
   };
 
   api.runtime.events.onSessionTranscriptUpdate((update) => {
@@ -430,7 +445,7 @@ export function registerKeepGoingPlugin(api: OpenClawPluginApi): void {
     }
   });
 
-  api.on("before_agent_start", (_event, ctx) => {
+  api.on("before_model_resolve", (_event, ctx) => {
     runtime.sessionActivity.markRunStarted({
       sessionKey: ctx.sessionKey,
       runId: ctx.runId,

@@ -1,6 +1,6 @@
 {
   "name": "@unblocklabs-ai/openclaw-keep-going",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "OpenClaw plugin that nudges unfinished agent turns to continue on the same Slack thread",
   "type": "module",
   "repository": {
