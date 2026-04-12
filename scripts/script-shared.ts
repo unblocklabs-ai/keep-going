@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { ParsedArgs } from "./cli-shared.js";
 
 const SAMPLE_DATA_ROOT_NAME = "sample_data";
 const SAMPLE_DATA_INPUT_DIR_NAME = "data";
@@ -33,6 +34,18 @@ export function mapWithConcurrency<TInput, TOutput>(
 
 export function buildTimestampSuffix(date = new Date()): string {
   return date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+export function resolveOptionalOutputPath(
+  args: ParsedArgs,
+  fallback: (filePath: string) => string,
+  filePath: string,
+): string {
+  const override = args.out;
+  if (typeof override === "string" && override.trim()) {
+    return path.resolve(override.trim());
+  }
+  return fallback(filePath);
 }
 
 function resolveSampleDataOutputDir(

@@ -1,21 +1,20 @@
-export type KeepGoingValidatorMode = "heuristic" | "llm";
 export type KeepGoingLlmValidatorProvider = "openai";
 
-export type KeepGoingHeuristicValidatorConfig = {
-  enabled: boolean;
-};
-
-export type KeepGoingLlmValidatorConfig = {
+export type OpenAiLlmCallConfig = {
   provider: KeepGoingLlmValidatorProvider;
   model: string;
   apiKey?: string;
   apiKeyEnv?: string;
+  temperature?: number;
+  timeoutMs?: number;
+};
+
+export type KeepGoingLlmValidatorConfig = OpenAiLlmCallConfig & {
+  systemPrompt: string;
   maxMessages: number;
   maxChars: number;
   includeCurrentTurnOnly: boolean;
   recentUserMessages: number;
-  temperature?: number;
-  timeoutMs?: number;
 };
 
 export type KeepGoingPluginConfig = {
@@ -23,8 +22,6 @@ export type KeepGoingPluginConfig = {
   channels: string[];
   timeoutMs?: number;
   validator: {
-    mode: KeepGoingValidatorMode;
-    heuristic: KeepGoingHeuristicValidatorConfig;
     llm: KeepGoingLlmValidatorConfig;
   };
 };

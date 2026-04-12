@@ -3,7 +3,7 @@ import path from "node:path";
 import { validateContinuationWithLlm } from "../src/llm-validator.js";
 import { normalizeTranscriptMessages } from "../src/messages.js";
 import { normalizeString } from "../src/normalize.js";
-import { createOpenAiValidatorConfig } from "../src/openai-validator-config.js";
+import { createDefaultOpenAiValidatorConfig } from "../src/openai-validator-config.js";
 import {
   extractLastAssistantRunSummary,
   messageObjects,
@@ -17,6 +17,7 @@ import {
   parseConcurrency,
   parsePositiveInteger,
   readJsonl,
+  resolveOpenAiCliConfigOverrides,
   resolveRepoRoot,
   resolveSampleDataInputPath,
   type ParsedArgs,
@@ -24,6 +25,7 @@ import {
 import { loadMatchingFixtureSessionRoute } from "./fixture-session.js";
 import {
   mapWithConcurrency,
+  resolveOptionalOutputPath,
   resolveLlmReviewOutputPath,
   resolveLatestTruthTablePath,
 } from "./script-shared.js";
@@ -55,21 +57,11 @@ type PreparedRun = {
 };
 
 function buildValidatorConfig(args: ParsedArgs) {
-  return createOpenAiValidatorConfig({
-    model:
-      (typeof args.model === "string" && args.model.trim()) ||
-      process.env.KEEP_GOING_VALIDATOR_MODEL,
-    apiKey: typeof args["api-key"] === "string" ? args["api-key"].trim() : undefined,
-    apiKeyEnv:
-      (typeof args["api-key-env"] === "string" && args["api-key-env"].trim()) ||
-      process.env.KEEP_GOING_VALIDATOR_API_KEY_ENV,
-    maxMessages: 20,
-    maxChars: 20_000,
-    includeCurrentTurnOnly: true,
-    recentUserMessages: 3,
-    temperature: 0,
-    timeoutMs: parsePositiveInteger(args["timeout-ms"]) ?? 15_000,
-  });
+  return createDefaultOpenAiValidatorConfig(
+    resolveOpenAiCliConfigOverrides(args, {
+      modelEnvVars: ["KEEP_GOING_VALIDATOR_MODEL"],
+    }),
+  );
 }
 
 function parseRunFilter(value: string | boolean | undefined, runCount: number): number[] {
@@ -87,13 +79,6 @@ function parseRunFilter(value: string | boolean | undefined, runCount: number): 
     throw new Error(`invalid --run value "${String(value)}"; expected all, latest, or 0..${runCount - 1}`);
   }
   return [parsed];
-}
-
-function resolveOutputPath(filePath: string, override: string | boolean | undefined): string {
-  if (typeof override === "string" && override.trim()) {
-    return path.resolve(override.trim());
-  }
-  return resolveLlmReviewOutputPath(filePath);
 }
 
 function resolveTruthTablePath(filePath: string, override: string | boolean | undefined): string {
@@ -375,7 +360,7 @@ async function main(): Promise<void> {
   reviews.sort((left, right) => left.runIndex - right.runIndex);
   const evaluation = summarizeEvaluation(reviews);
 
-  const outputPath = resolveOutputPath(filePath, args.out);
+  const outputPath = resolveOptionalOutputPath(args, resolveLlmReviewOutputPath, filePath);
   const output = {
     sourceFile: filePath,
     generatedAt: new Date().toISOString(),

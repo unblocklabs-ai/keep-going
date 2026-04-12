@@ -1,4 +1,4 @@
-import type { KeepGoingLlmValidatorConfig } from "./types.js";
+import type { OpenAiLlmCallConfig } from "./types.js";
 import { callResponsesJsonSchema, resolveLlmApiKey } from "./responses-json-schema.js";
 
 const TRUTH_LABEL_MAX_OUTPUT_TOKENS = 500;
@@ -27,7 +27,7 @@ const TRUTH_LABEL_SYSTEM_PROMPT = [
 ].join("\n");
 
 export type TruthLabelInput = {
-  config: KeepGoingLlmValidatorConfig;
+  config: OpenAiLlmCallConfig;
   prompt: string;
 };
 

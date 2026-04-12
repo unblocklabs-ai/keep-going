@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { normalizeTranscriptMessages, type TranscriptMessage } from "../src/messages.js";
-import { createOpenAiValidatorConfig } from "../src/openai-validator-config.js";
+import { createDefaultOpenAiValidatorConfig } from "../src/openai-validator-config.js";
 import { labelTruthWithLlm } from "../src/truth-labeler.js";
 import {
   extractLastAssistantRunSummary,
@@ -15,43 +15,26 @@ import {
   parseConcurrency,
   parsePositiveInteger,
   readJsonl,
+  resolveOpenAiCliConfigOverrides,
+  resolveRequiredSampleDataInputPath,
   resolveRepoRoot,
-  resolveSampleDataInputPath,
   type ParsedArgs,
 } from "./cli-shared.js";
 import {
   mapWithConcurrency,
+  resolveOptionalOutputPath,
   resolvePreservedTruthTableOutputPath,
 } from "./script-shared.js";
 function buildLabelerConfig(args: ParsedArgs) {
-  return createOpenAiValidatorConfig({
-    model:
-      (typeof args.model === "string" && args.model.trim()) ||
-      process.env.KEEP_GOING_TRUTH_LABEL_MODEL ||
-      process.env.KEEP_GOING_VALIDATOR_MODEL,
-    apiKey: typeof args["api-key"] === "string" ? args["api-key"].trim() : undefined,
-    apiKeyEnv:
-      (typeof args["api-key-env"] === "string" && args["api-key-env"].trim()) ||
-      process.env.KEEP_GOING_TRUTH_LABEL_API_KEY_ENV ||
-      process.env.KEEP_GOING_VALIDATOR_API_KEY_ENV,
+  return createDefaultOpenAiValidatorConfig({
+    ...resolveOpenAiCliConfigOverrides(args, {
+      modelEnvVars: ["KEEP_GOING_TRUTH_LABEL_MODEL", "KEEP_GOING_VALIDATOR_MODEL"],
+      defaultTimeoutMs: 30_000,
+    }),
     maxMessages: Number.MAX_SAFE_INTEGER,
     maxChars: parsePositiveInteger(args["max-chars"]) ?? 200_000,
     includeCurrentTurnOnly: false,
-    recentUserMessages: 3,
-    temperature: 0,
-    timeoutMs: parsePositiveInteger(args["timeout-ms"]) ?? 30_000,
   });
-}
-
-function resolveInputPath(repoRoot: string, providedFile: string): string {
-  return resolveSampleDataInputPath(repoRoot, providedFile);
-}
-
-function resolveOutputPath(filePath: string, override: string | boolean | undefined): string {
-  if (typeof override === "string" && override.trim()) {
-    return path.resolve(override.trim());
-  }
-  return resolvePreservedTruthTableOutputPath(filePath);
 }
 
 function renderTranscript(messages: TranscriptMessage[], maxChars: number): string {
@@ -97,12 +80,7 @@ async function main(): Promise<void> {
   loadDotEnv(path.join(repoRoot, ".env"));
 
   const args = parseArgs(process.argv.slice(2));
-  const providedFile = typeof args.file === "string" ? args.file : undefined;
-  if (!providedFile) {
-    throw new Error("missing required --file argument");
-  }
-
-  const filePath = resolveInputPath(repoRoot, providedFile);
+  const filePath = resolveRequiredSampleDataInputPath(repoRoot, args);
   const entries = readJsonl(filePath);
   const sessionId = findSessionId(entries);
   const completedRuns = splitIntoCompletedRuns(entries);
@@ -190,7 +168,11 @@ async function main(): Promise<void> {
     labels,
   };
 
-  const outputPath = resolveOutputPath(filePath, args.out);
+  const outputPath = resolveOptionalOutputPath(
+    args,
+    resolvePreservedTruthTableOutputPath,
+    filePath,
+  );
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, `${JSON.stringify(output, null, 2)}\n`, "utf8");
   console.log(outputPath);

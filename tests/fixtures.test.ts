@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { resolveKeepGoingConfig } from "../src/config.js";
 import { buildValidatorPrompt } from "../src/llm-validator.js";
+import { createDefaultOpenAiValidatorConfig } from "../src/openai-validator-config.js";
 import {
   extractInitialSlackThreadHistoryMessages,
   extractLastAssistantHumanFacingText,
@@ -57,18 +59,7 @@ function createCandidate(messages: unknown[]): ContinuationCandidate {
 function createValidatorConfig(
   overrides?: Partial<KeepGoingLlmValidatorConfig>,
 ): KeepGoingLlmValidatorConfig {
-  return {
-    provider: "openai",
-    model: "gpt-5.4-mini",
-    apiKeyEnv: "KEEP_GOING_OPENAI_API_KEY",
-    maxMessages: 20,
-    maxChars: 20_000,
-    includeCurrentTurnOnly: true,
-    recentUserMessages: 3,
-    temperature: 0,
-    timeoutMs: 15_000,
-    ...overrides,
-  };
+  return createDefaultOpenAiValidatorConfig(overrides);
 }
 
 test("resolveSessionRoute reconstructs a real Slack thread route from sessions.json", () => {
@@ -149,7 +140,7 @@ test("validator prompt with current-turn-only excludes earlier turns from the sa
   const currentTurnTranscript = normalized.slice(currentTurnStart);
   const prompt = buildValidatorPrompt({
     candidate,
-    config: createValidatorConfig({ includeCurrentTurnOnly: true }),
+    config: createValidatorConfig({ includeCurrentTurnOnly: true, maxMessages: 20 }),
     context: {
       runTranscriptMessages: currentTurnTranscript,
     },
@@ -158,6 +149,13 @@ test("validator prompt with current-turn-only excludes earlier turns from the sa
   assert.match(prompt, /Conversation scope: current work plus up to 3 recent user turns/);
   assert.match(prompt, /Send a subagent to investigate the cron itself/i);
   assert.doesNotMatch(prompt, /are you sure\?/i);
+});
+
+test("shared default validator config matches runtime plugin defaults", () => {
+  assert.deepEqual(
+    resolveKeepGoingConfig({}).validator.llm,
+    createDefaultOpenAiValidatorConfig(),
+  );
 });
 
 test("validator prompt can include up to the last three user turns from session history", () => {

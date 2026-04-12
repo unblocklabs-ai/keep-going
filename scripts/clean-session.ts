@@ -10,18 +10,11 @@ import {
   loadDotEnv,
   parseArgs,
   readJsonl,
+  resolveRequiredSampleDataInputPath,
   resolveRepoRoot,
-  resolveSampleDataInputPath,
 } from "./cli-shared.js";
-import { resolveCleanedOutputPath } from "./script-shared.js";
+import { resolveCleanedOutputPath, resolveOptionalOutputPath } from "./script-shared.js";
 import { messageObjects, splitIntoCompletedRuns } from "./transcript-runs.js";
-
-function resolveOutputPath(filePath: string, override: string | boolean | undefined): string {
-  if (typeof override === "string" && override.trim()) {
-    return path.resolve(override.trim());
-  }
-  return resolveCleanedOutputPath(filePath);
-}
 
 type CleanedTurnMessage = {
   type: "user" | "assistant";
@@ -50,12 +43,7 @@ async function main(): Promise<void> {
   loadDotEnv(path.join(repoRoot, ".env"));
 
   const args = parseArgs(process.argv.slice(2));
-  const providedFile = typeof args.file === "string" ? args.file : undefined;
-  if (!providedFile) {
-    throw new Error("missing required --file argument");
-  }
-
-  const filePath = resolveSampleDataInputPath(repoRoot, providedFile);
+  const filePath = resolveRequiredSampleDataInputPath(repoRoot, args);
   const entries = readJsonl(filePath);
   const sessionId = findSessionId(entries);
   const completedRuns = splitIntoCompletedRuns(entries);
@@ -87,7 +75,7 @@ async function main(): Promise<void> {
     msgs: mergeAdjacentAssistantMessages([...initialHistoryMessages, ...msgs]),
   };
 
-  const outputPath = resolveOutputPath(filePath, args.out);
+  const outputPath = resolveOptionalOutputPath(args, resolveCleanedOutputPath, filePath);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, `${JSON.stringify(output, null, 2)}\n`, "utf8");
   console.log(outputPath);

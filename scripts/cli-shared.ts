@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { DEFAULT_OPENAI_VALIDATOR_CONFIG } from "../src/openai-validator-config.js";
+import type { OpenAiLlmCallConfig } from "../src/types.js";
 import type { JsonlEntry } from "./transcript-runs.js";
 
 export type ParsedArgs = Record<string, string | boolean>;
@@ -22,6 +24,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
     index += 1;
   }
   return parsed;
+}
+
+export function readStringArg(
+  args: ParsedArgs,
+  key: string,
+): string | undefined {
+  const value = args[key];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 export function loadDotEnv(filePath: string): void {
@@ -92,6 +102,35 @@ export function parseConcurrency(
   return Math.min(max, Math.max(1, parsed));
 }
 
+function resolveFirstEnvValue(names: string[]): string | undefined {
+  for (const name of names) {
+    const value = process.env[name];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+export function resolveOpenAiCliConfigOverrides(
+  args: ParsedArgs,
+  options: {
+    modelEnvVars: string[];
+    defaultTimeoutMs?: number;
+  },
+): Partial<OpenAiLlmCallConfig> {
+  const model = readStringArg(args, "model") ?? resolveFirstEnvValue(options.modelEnvVars);
+  const apiKey = readStringArg(args, "api-key");
+  const timeoutMs = parsePositiveInteger(args["timeout-ms"]) ?? options.defaultTimeoutMs;
+
+  return {
+    ...(model ? { model } : {}),
+    ...(apiKey ? { apiKey } : {}),
+    apiKeyEnv: DEFAULT_OPENAI_VALIDATOR_CONFIG.apiKeyEnv,
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+  };
+}
+
 export function resolveSampleDataInputPath(repoRoot: string, providedFile: string): string {
   if (path.isAbsolute(providedFile)) {
     return providedFile;
@@ -103,6 +142,17 @@ export function resolveSampleDataInputPath(repoRoot: string, providedFile: strin
   }
 
   return path.join(repoRoot, "sample_data", "data", providedFile);
+}
+
+export function resolveRequiredSampleDataInputPath(
+  repoRoot: string,
+  args: ParsedArgs,
+): string {
+  const providedFile = readStringArg(args, "file");
+  if (!providedFile) {
+    throw new Error("missing required --file argument");
+  }
+  return resolveSampleDataInputPath(repoRoot, providedFile);
 }
 
 export function resolveRepoRoot(moduleUrl: string): string {

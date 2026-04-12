@@ -24,7 +24,7 @@ export async function launchContinuation(
   const extraSystemPrompt = [
     "A completion validator flagged the previous turn as possibly incomplete.",
     "The validator may be wrong.",
-    "If the previous turn was actually complete, reply briefly that it is complete and stop.",
+    "If the previous turn was actually complete, reply exactly NO_REPLY and stop.",
     "If you are truly blocked, state the exact blocker briefly and stop.",
     params.decision.followUpInstruction ??
       "Otherwise, perform the next remaining actionable step now.",

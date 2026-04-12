@@ -14,7 +14,6 @@ import type {
   KeepGoingPluginConfig,
   SessionRoute,
 } from "./types.js";
-import { validateContinuation } from "./validator.js";
 
 type AgentEndEvent = {
   messages: unknown[];
@@ -291,42 +290,29 @@ async function evaluateDecision(
 ): Promise<EvaluatedDecision | undefined> {
   const { config, logger, sessionActivity } = runtime;
 
-  switch (config.validator.mode) {
-    case "llm":
-      try {
-        const decision = await validateContinuationWithLlm({
-          candidate,
-          config: config.validator.llm,
-          context: {
-            runTranscriptMessages: sessionActivity.getRunTranscriptMessages(candidate.runId),
-            sessionTranscriptMessages: sessionActivity.getSessionTranscriptMessages(
-              candidate.sessionKey,
-            ),
-          },
-        });
-        return {
-          decision,
-          validatorModel: decision.validatorModel,
-        };
-      } catch (error) {
-        logger.warn("keep-going skipped: llm validator failed", {
-          runId: candidate.runId,
-          sessionKey: candidate.sessionKey,
-          model: config.validator.llm.model,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return undefined;
-      }
-    case "heuristic":
-      if (!config.validator.heuristic.enabled) {
-        logSkip(logger, "heuristic disabled", { runId: candidate.runId });
-        return undefined;
-      }
-      return {
-        decision: validateContinuation(candidate),
-      };
-    default:
-      return undefined;
+  try {
+    const decision = await validateContinuationWithLlm({
+      candidate,
+      config: config.validator.llm,
+      context: {
+        runTranscriptMessages: sessionActivity.getRunTranscriptMessages(candidate.runId),
+        sessionTranscriptMessages: sessionActivity.getSessionTranscriptMessages(
+          candidate.sessionKey,
+        ),
+      },
+    });
+    return {
+      decision,
+      validatorModel: decision.validatorModel,
+    };
+  } catch (error) {
+    logger.warn("keep-going skipped: llm validator failed", {
+      runId: candidate.runId,
+      sessionKey: candidate.sessionKey,
+      model: config.validator.llm.model,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return undefined;
   }
 }
 
@@ -343,7 +329,6 @@ function shouldAbortBeforeLaunch(
     logSkip(logger, "validator declined", {
       runId: candidate.runId,
       reason: decision.reason,
-      validatorMode: runtime.config.validator.mode,
       ...(validatorModel ? { validatorModel } : {}),
     });
     return true;
@@ -404,7 +389,6 @@ async function launchEligibleContinuation(
       sessionKey: candidate.sessionKey,
       threadId: route.threadId,
       reason: decision.reason,
-      validatorMode: config.validator.mode,
       ...(validatorModel ? { validatorModel } : {}),
     });
   } catch (error) {
@@ -412,7 +396,6 @@ async function launchEligibleContinuation(
       runId: candidate.runId,
       sessionKey: candidate.sessionKey,
       reason: decision.reason,
-      validatorMode: config.validator.mode,
       ...(validatorModel ? { validatorModel } : {}),
       error: error instanceof Error ? error.message : String(error),
     });

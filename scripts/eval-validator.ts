@@ -1,13 +1,14 @@
 import path from "node:path";
 import { buildValidatorPrompt, validateContinuationWithLlm } from "../src/llm-validator.js";
 import { normalizeTranscriptMessages } from "../src/messages.js";
-import { createOpenAiValidatorConfig } from "../src/openai-validator-config.js";
+import { createDefaultOpenAiValidatorConfig } from "../src/openai-validator-config.js";
 import { messageObjects, splitIntoCompletedRuns } from "./transcript-runs.js";
 import type { ContinuationCandidate } from "../src/types.js";
 import {
   findSessionId,
   loadDotEnv,
   parseArgs,
+  resolveOpenAiCliConfigOverrides,
   resolveSampleDataInputPath,
   resolveRepoRoot,
   readJsonl,
@@ -59,7 +60,10 @@ async function main(): Promise<void> {
 
   const firstSessionEntry = entries.find((entry) => entry.type === "session");
   const sessionId = firstSessionEntry ? findSessionId(entries) : "fixture-session";
-  const model = typeof args.model === "string" ? args.model.trim() : process.env.KEEP_GOING_VALIDATOR_MODEL;
+  const validatorOverrides = resolveOpenAiCliConfigOverrides(args, {
+    modelEnvVars: ["KEEP_GOING_VALIDATOR_MODEL"],
+  });
+  const model = validatorOverrides.model;
 
   const candidate: ContinuationCandidate = {
     runId: `fixture-run-${selectedRunIndex}`,
@@ -74,21 +78,7 @@ async function main(): Promise<void> {
     messages: runMessages,
   };
 
-  const config = createOpenAiValidatorConfig({
-    model:
-      model ||
-      process.env.KEEP_GOING_VALIDATOR_MODEL,
-    apiKey: typeof args["api-key"] === "string" ? args["api-key"].trim() : undefined,
-    apiKeyEnv:
-      (typeof args["api-key-env"] === "string" && args["api-key-env"].trim()) ||
-      process.env.KEEP_GOING_VALIDATOR_API_KEY_ENV,
-    maxMessages: 20,
-    maxChars: 20_000,
-    includeCurrentTurnOnly: true,
-    recentUserMessages: 3,
-    temperature: 0,
-    timeoutMs: 15_000,
-  });
+  const config = createDefaultOpenAiValidatorConfig(validatorOverrides);
   const sessionMessages = segments
     .slice(0, selectedRunIndex + 1)
     .flatMap((segment) => messageObjects(segment.entries));

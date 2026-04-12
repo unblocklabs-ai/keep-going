@@ -1,5 +1,5 @@
 import { normalizeString } from "./normalize.js";
-import type { KeepGoingLlmValidatorConfig } from "./types.js";
+import type { OpenAiLlmCallConfig } from "./types.js";
 
 const OPENAI_RESPONSES_API_URL = "https://api.openai.com/v1/responses";
 
@@ -15,7 +15,7 @@ type ResponsesApiOutputItem = {
 };
 
 type ResponsesJsonSchemaRequest = {
-  config: KeepGoingLlmValidatorConfig;
+  config: OpenAiLlmCallConfig;
   systemPrompt: string;
   userPrompt: string;
   schemaName: string;
@@ -84,7 +84,7 @@ function extractRefusalText(responseBody: unknown): string | undefined {
 }
 
 export function resolveLlmApiKey(
-  config: Pick<KeepGoingLlmValidatorConfig, "apiKey" | "apiKeyEnv">,
+  config: Pick<OpenAiLlmCallConfig, "apiKey" | "apiKeyEnv">,
 ): string | undefined {
   const inlineApiKey = config.apiKey?.trim();
   if (inlineApiKey) {

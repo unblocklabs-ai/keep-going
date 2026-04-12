@@ -6,7 +6,7 @@ Its job is simple:
 
 - let Turn A finish normally
 - inspect the completed run after `agent_end`
-- if the turn appears unfinished, launch one advisory Turn B on the same session and Slack thread
+- if the LLM validator thinks the turn appears unfinished, launch one advisory Turn B on the same session and Slack thread
 - let the main agent disagree with the nudge if it is actually done or blocked
 
 ## How It Works
@@ -67,7 +67,7 @@ Current behavior is intentionally narrow:
 - skips `heartbeat` and `cron` runs
 - skips while a child subagent is still in flight for the parent session
 - skips subagent and spawned-session runs
-- supports either a cheap heuristic validator or a direct OpenAI LLM validator
+- uses a direct OpenAI LLM validator for continuation decisions
 - launches at most one follow-up Turn B per origin run
 
 Operational details:
@@ -88,11 +88,10 @@ The validator is advisory, not authoritative. Turn B is instructed to stop immed
 
 ## LLM Validator
 
-Phase 2 adds an optional direct OpenAI validator.
+The plugin uses a direct OpenAI validator.
 
 Important properties of this path:
 
-- the LLM validator replaces the heuristic when `validator.mode` is set to `llm`
 - the validator itself does not use `runEmbeddedPiAgent(...)`
 - the validator calls OpenAI directly, so it does not create a new OpenClaw run or session
 - Turn B remains the only user-visible continuation run
@@ -102,14 +101,15 @@ The validator config is plugin-local and model-swappable so judge evals are easy
 ```json
 {
   "validator": {
-    "mode": "llm",
     "llm": {
       "model": "gpt-5.4-mini",
+      "systemPrompt": "Override only if you want to replace the built-in validator prompt.",
       "apiKeyEnv": "KEEP_GOING_OPENAI_API_KEY",
       "maxMessages": 10,
       "maxChars": 20000,
       "includeCurrentTurnOnly": true,
-      "temperature": 0,
+      "recentUserMessages": 3,
+      "temperature": 0.2,
       "timeoutMs": 15000
     }
   }
@@ -127,6 +127,7 @@ The validator uses a capped recent transcript window from the completed run:
 - `maxMessages` limits how many transcript messages are considered
 - `maxChars` caps the rendered prompt size
 - `includeCurrentTurnOnly: true` narrows the window to the last user turn when possible
+- `systemPrompt` defaults to the built-in validator prompt and can be overridden without code changes
 
 ## Troubleshooting
 
@@ -151,14 +152,15 @@ The plugin exposes a small config surface through `openclaw.plugin.json`:
   "channels": ["slack"],
   "timeoutMs": 120000,
   "validator": {
-    "mode": "llm",
     "llm": {
       "model": "gpt-5.4-mini",
+      "systemPrompt": "Default validator prompt string omitted here for brevity; override this to customize continuation judgment behavior.",
       "apiKeyEnv": "KEEP_GOING_OPENAI_API_KEY",
       "maxMessages": 10,
       "maxChars": 20000,
       "includeCurrentTurnOnly": true,
-      "temperature": 0,
+      "recentUserMessages": 3,
+      "temperature": 0.2,
       "timeoutMs": 15000
     }
   }
@@ -167,15 +169,14 @@ The plugin exposes a small config surface through `openclaw.plugin.json`:
 
 Notes:
 
-- `validator.heuristic.enabled` controls the phase-1 heuristic mode
-- when `validator.mode` is `llm`, the heuristic is not used as a fallback
 - inline `validator.llm.apiKey` is supported, but `apiKeyEnv` is the cleaner default
+- `validator.llm.systemPrompt` lets you override the validator system prompt; if omitted, the built-in prompt is used
+- `validator.llm.recentUserMessages` controls how many recent user turns are kept when `includeCurrentTurnOnly` is true
 
 ## Repository Notes
 
 - `index.ts` registers the native plugin entry
 - `src/plugin.ts` wires the `agent_end` hook and launch flow
-- `src/validator.ts` contains the phase-1 heuristic
 - `src/session-route.ts` recovers Slack routing from session metadata
 - `src/launcher.ts` launches the advisory continuation turn
 - `plan/` holds the design docs for scope and architecture
@@ -190,7 +191,7 @@ The goal is to answer one question with real usage data:
 
 Phase 1 answer was yes: the post-turn same-session continuation architecture works in practice.
 
-Phase 2 answer is now testable: the validator can be switched from heuristic to direct LLM judgment without changing the Turn B runtime path.
+The continuation decision path is now LLM-only without changing the Turn B runtime path.
 
 ## Local Validator Eval
 

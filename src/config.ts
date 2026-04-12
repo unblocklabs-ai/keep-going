@@ -1,6 +1,5 @@
 import {
-  createOpenAiValidatorConfig,
-  DEFAULT_OPENAI_API_KEY_ENV,
+  createDefaultOpenAiValidatorConfig,
 } from "./openai-validator-config.js";
 import type { KeepGoingPluginConfig } from "./types.js";
 
@@ -8,19 +7,7 @@ const DEFAULT_CONFIG: KeepGoingPluginConfig = {
   enabled: true,
   channels: ["slack"],
   validator: {
-    mode: "heuristic",
-    heuristic: {
-      enabled: true,
-    },
-    llm: createOpenAiValidatorConfig({
-      maxMessages: 10,
-      maxChars: 20_000,
-      includeCurrentTurnOnly: true,
-      recentUserMessages: 3,
-      temperature: 0,
-      timeoutMs: 15_000,
-      apiKeyEnv: DEFAULT_OPENAI_API_KEY_ENV,
-    }),
+    llm: createDefaultOpenAiValidatorConfig(),
   },
 };
 
@@ -49,19 +36,11 @@ function normalizeBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
-function normalizeValidatorMode(value: unknown): KeepGoingPluginConfig["validator"]["mode"] {
-  return value === "llm" ? "llm" : "heuristic";
-}
-
 export function resolveKeepGoingConfig(raw: unknown): KeepGoingPluginConfig {
   const config = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const validator =
     config.validator && typeof config.validator === "object"
       ? (config.validator as Record<string, unknown>)
-      : {};
-  const validatorHeuristic =
-    validator.heuristic && typeof validator.heuristic === "object"
-      ? (validator.heuristic as Record<string, unknown>)
       : {};
   const validatorLlm =
     validator.llm && typeof validator.llm === "object"
@@ -74,18 +53,15 @@ export function resolveKeepGoingConfig(raw: unknown): KeepGoingPluginConfig {
     channels: channels.length > 0 ? channels : DEFAULT_CONFIG.channels,
     timeoutMs: normalizePositiveInteger(config.timeoutMs),
     validator: {
-      mode: normalizeValidatorMode(validator.mode),
-      heuristic: {
-        enabled: normalizeBoolean(
-          validatorHeuristic.enabled,
-          DEFAULT_CONFIG.validator.heuristic.enabled,
-        ),
-      },
-      llm: createOpenAiValidatorConfig({
+      llm: createDefaultOpenAiValidatorConfig({
         model:
           typeof validatorLlm.model === "string" && validatorLlm.model.trim()
             ? validatorLlm.model.trim()
             : DEFAULT_CONFIG.validator.llm.model,
+        systemPrompt:
+          typeof validatorLlm.systemPrompt === "string" && validatorLlm.systemPrompt.trim()
+            ? validatorLlm.systemPrompt
+            : DEFAULT_CONFIG.validator.llm.systemPrompt,
         apiKey:
           typeof validatorLlm.apiKey === "string" && validatorLlm.apiKey.trim()
             ? validatorLlm.apiKey.trim()

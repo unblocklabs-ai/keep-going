@@ -2,34 +2,18 @@ import fs from "node:fs";
 import path from "node:path";
 import { extractLastAssistantRunSummary, splitIntoCompletedRuns } from "./transcript-runs.js";
 import {
-  findSessionId,
   parseArgs,
+  findSessionId,
   readJsonl,
+  resolveRequiredSampleDataInputPath,
   resolveRepoRoot,
-  resolveSampleDataInputPath,
 } from "./cli-shared.js";
-import { resolveCanonicalTruthTablePath } from "./script-shared.js";
-
-function resolveInputPath(repoRoot: string, providedFile: string): string {
-  return resolveSampleDataInputPath(repoRoot, providedFile);
-}
-
-function resolveOutputPath(filePath: string, override: string | boolean | undefined): string {
-  if (typeof override === "string" && override.trim()) {
-    return path.resolve(override.trim());
-  }
-  return resolveCanonicalTruthTablePath(filePath);
-}
+import { resolveCanonicalTruthTablePath, resolveOptionalOutputPath } from "./script-shared.js";
 
 async function main(): Promise<void> {
   const repoRoot = resolveRepoRoot(import.meta.url);
   const args = parseArgs(process.argv.slice(2));
-  const providedFile = typeof args.file === "string" ? args.file : undefined;
-  if (!providedFile) {
-    throw new Error("missing required --file argument");
-  }
-
-  const filePath = resolveInputPath(repoRoot, providedFile);
+  const filePath = resolveRequiredSampleDataInputPath(repoRoot, args);
   const entries = readJsonl(filePath);
   const sessionId = findSessionId(entries);
   const completedRuns = splitIntoCompletedRuns(entries);
@@ -57,7 +41,7 @@ async function main(): Promise<void> {
     labels,
   };
 
-  const outputPath = resolveOutputPath(filePath, args.out);
+  const outputPath = resolveOptionalOutputPath(args, resolveCanonicalTruthTablePath, filePath);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, `${JSON.stringify(output, null, 2)}\n`, "utf8");
   console.log(outputPath);

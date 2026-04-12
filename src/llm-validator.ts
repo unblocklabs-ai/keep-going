@@ -1,5 +1,6 @@
 import { normalizeTranscriptMessages, type TranscriptMessage } from "./messages.js";
 import { normalizeString } from "./normalize.js";
+import { OPENAI_VALIDATOR_INTERNAL_DEFAULTS } from "./openai-validator-config.js";
 import { callResponsesJsonSchema, resolveLlmApiKey } from "./responses-json-schema.js";
 import type {
   ContinuationCandidate,
@@ -7,8 +8,6 @@ import type {
   ContinuationValidationContext,
   KeepGoingLlmValidatorConfig,
 } from "./types.js";
-
-const VALIDATOR_MAX_OUTPUT_TOKENS = 400;
 
 const CONTINUATION_DECISION_SCHEMA = {
   type: "object",
@@ -20,29 +19,6 @@ const CONTINUATION_DECISION_SCHEMA = {
   },
   required: ["continue", "reason", "follow_up_instruction"],
 } as const;
-
-const VALIDATOR_SYSTEM_PROMPT = [
-  "You are a completion validator for a coding agent.",
-  "Your job is to decide whether the agent's just-finished turn should immediately continue in a follow-up run.",
-  "Return continue=true only when there is clearly remaining actionable work the same agent should do now without waiting for the user.",
-  "Return continue=false when the work appears complete, the agent is truly blocked, or the next step requires new user input or approval.",
-  "Anchor your decision to the user's requested end state, not just the assistant's last reply.",
-  "If the assistant has only completed an intermediate step and still owns an obvious next action needed to satisfy the user's request, return continue=true.",
-  "If the assistant explicitly states a remaining concrete next step that it should do now, that is strong evidence for continue=true.",
-  "If the assistant just finished an audit, diagnosis, test, or investigation and identified the next repair, implementation, validation, or cleanup step inside the same standing task, default to continue=true.",
-  "Do not require the assistant to explicitly say 'next I will' if the remaining work is already clear from the user's request, the current state, and the assistant's own findings.",
-  "Treat statements like 'I'd patch that next', 'that's the next thing I'd fix', 'the next fix is clear', 'I'm validating', or 'I'm checking' as evidence of unfinished owned work unless the transcript clearly shows that work was delegated away or blocked.",
-  "Do not require a fresh user request when the user is still pursuing the same underlying task and the assistant has enough information to take the next concrete step now.",
-  "Treat polite hedge phrases like 'if you want', 'I can', 'I should', 'I still need to', or 'I'll take that next' as likely incomplete work when the assistant identifies a concrete next step inside the same standing task and does not state a real blocker.",
-  "If the assistant says the result should be tightened, cleaned up, patched, verified, confirmed, or surfaced properly before the task is really done, that is evidence for continue=true even if phrased as an offer.",
-  "If the assistant already delegated the next step to a spawned subagent or child worker, or is waiting on that delegated work, that parent turn should usually be continue=false.",
-  "If the assistant says it already sent a subagent, child worker, or separate worker to do the next step, treat the parent turn as continue=false unless the parent also names a separate concrete step that the parent itself still needs to do now.",
-  "Do not require the user to re-approve a next step that is already implied by the existing task unless the transcript clearly asks the assistant to stop after the current answer.",
-  "Do not treat optional future ideas, stretch goals, or vague improvements as incomplete work.",
-  "If continue=true, provide a short follow_up_instruction telling the agent what remaining step to do next.",
-  "If continue=false, set follow_up_instruction to an empty string.",
-  "Be conservative about continuing when the transcript shows a real blocker.",
-].join("\n");
 
 export type LlmValidatorInput = {
   candidate: ContinuationCandidate;
@@ -276,11 +252,11 @@ export async function validateContinuationWithLlm(
   const response = await callResponsesJsonSchema(
     {
       config: input.config,
-      systemPrompt: VALIDATOR_SYSTEM_PROMPT,
+      systemPrompt: input.config.systemPrompt,
       userPrompt: buildValidatorPrompt(input),
       schemaName: "keep_going_decision",
       schema: CONTINUATION_DECISION_SCHEMA,
-      maxOutputTokens: VALIDATOR_MAX_OUTPUT_TOKENS,
+      maxOutputTokens: OPENAI_VALIDATOR_INTERNAL_DEFAULTS.maxOutputTokens,
     },
     apiKey,
   );
