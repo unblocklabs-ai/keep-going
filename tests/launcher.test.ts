@@ -100,7 +100,7 @@ test("plugin-started continuation replies route to the stored Slack thread even 
   assert.equal(deliveredPayloads.length, 1);
   assert.equal(deliveredPayloads[0]?.to, "channel:C123");
   assert.equal(deliveredPayloads[0]?.threadId, "1712345678.000100");
-  assert.equal(deliveredPayloads[0]?.replyToId, "1776309280.777379");
+  assert.equal(deliveredPayloads[0]?.replyToId, undefined);
   assert.equal(deliveredPayloads[0]?.accountId, "default");
   assert.deepEqual(deliveredPayloads[0]?.payload, {
     text: "It woke cleanly on 0.1.8...",

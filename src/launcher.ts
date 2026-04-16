@@ -42,15 +42,17 @@ async function deliverContinuationReplyPayload(
     throw new Error(`missing outbound adapter for channel ${params.sessionRoute.channel}`);
   }
 
+  const isSlackChannel = params.sessionRoute.channel === "slack";
   const deliveryContext = {
     cfg: api.config,
     to: params.sessionRoute.to,
     text: typeof payload.text === "string" ? payload.text : "",
     payload,
     threadId: params.sessionRoute.threadId,
-    replyToId:
-      payload.replyToId ??
-      (params.wakeContext.currentMessageId ? String(params.wakeContext.currentMessageId) : undefined),
+    replyToId: isSlackChannel
+      ? undefined
+      : payload.replyToId ??
+        (params.wakeContext.currentMessageId ? String(params.wakeContext.currentMessageId) : undefined),
     accountId: params.sessionRoute.accountId,
   };
 
