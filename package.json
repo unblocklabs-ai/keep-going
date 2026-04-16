@@ -1,6 +1,6 @@
 {
   "name": "@unblocklabs-ai/openclaw-keep-going",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "OpenClaw plugin that starts a same-session follow-up run when the validator sees unfinished work",
   "type": "module",
   "repository": {
