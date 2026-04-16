@@ -1,10 +1,22 @@
 import crypto from "node:crypto";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX } from "./constants.js";
+import type { KeepGoingLogger } from "./logging.js";
 import type { LaunchContinuationParams } from "./types.js";
 
+export type SessionFileResolverApi = {
+  runtime: {
+    agent: {
+      session: Pick<
+        OpenClawPluginApi["runtime"]["agent"]["session"],
+        "resolveSessionFilePath"
+      >;
+    };
+  };
+};
+
 export function resolveContinuationSessionFile(
-  api: OpenClawPluginApi,
+  api: SessionFileResolverApi,
   params: Pick<LaunchContinuationParams, "candidate" | "sessionRoute">,
 ): string {
   return api.runtime.agent.session.resolveSessionFilePath(
@@ -17,6 +29,7 @@ export function resolveContinuationSessionFile(
 export async function launchContinuation(
   api: OpenClawPluginApi,
   params: LaunchContinuationParams,
+  logger?: KeepGoingLogger,
 ): Promise<{ followUpRunId: string }> {
   const followUpRunId = `${KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX}${crypto.randomUUID()}`;
   const provider = params.sessionRoute.modelProviderId ?? params.candidate.modelProviderId;
@@ -30,6 +43,21 @@ export async function launchContinuation(
       "Otherwise, perform the next remaining actionable step now.",
     "Before your first tool call, send a brief interim update that you are continuing the remaining work from the previous turn.",
   ].join("\n");
+
+  logger?.step("attempting continuation wake", {
+    runId: params.candidate.runId,
+    followUpRunId,
+    sessionId: params.candidate.sessionId,
+    sessionKey: params.candidate.sessionKey,
+    sessionFile: params.sessionFile,
+    provider,
+    model,
+    timeoutMs: params.timeoutMs,
+    threadId: params.sessionRoute.threadId,
+    channel: params.sessionRoute.channel,
+    hasAuthProfileId: Boolean(params.sessionRoute.authProfileId),
+    hasFollowUpInstruction: Boolean(params.decision.followUpInstruction),
+  });
 
   await api.runtime.agent.runEmbeddedPiAgent({
     sessionId: params.candidate.sessionId,
@@ -50,6 +78,14 @@ export async function launchContinuation(
     messageThreadId: params.sessionRoute.threadId,
     agentAccountId: params.sessionRoute.accountId,
     extraSystemPrompt,
+  });
+
+  logger?.step("continuation wake request completed", {
+    runId: params.candidate.runId,
+    followUpRunId,
+    sessionId: params.candidate.sessionId,
+    sessionKey: params.candidate.sessionKey,
+    threadId: params.sessionRoute.threadId,
   });
 
   return { followUpRunId };

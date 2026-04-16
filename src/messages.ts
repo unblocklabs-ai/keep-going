@@ -1,11 +1,9 @@
 import { normalizeString } from "./normalize.js";
-
-export type TranscriptMessageRole = "user" | "assistant" | "tool" | "toolResult";
-
-export type TranscriptMessage = {
-  role: TranscriptMessageRole;
-  text: string;
-};
+import type {
+  SlackThreadHistoryMessage,
+  TranscriptMessage,
+  TranscriptMessageRole,
+} from "./transcript-types.js";
 
 const SUBAGENT_SPAWN_TOOL_NAMES = new Set(["sessions_spawn", "spawn_subagent"]);
 const NO_REPLY_TEXT = "NO_REPLY";
@@ -90,44 +88,20 @@ function extractMessageTexts(message: unknown): string[] {
   return [];
 }
 
-function extractToolCallTexts(message: Record<string, unknown>): string[] {
-  const values: string[] = [];
-  const toolCalls = message.tool_calls ?? message.toolCalls;
-  if (Array.isArray(toolCalls)) {
-    for (const entry of toolCalls) {
-      if (!entry || typeof entry !== "object") {
-        continue;
-      }
-      const value = entry as Record<string, unknown>;
-      const functionValue =
-        value.function && typeof value.function === "object"
-          ? (value.function as Record<string, unknown>)
-          : undefined;
-      const name =
-        normalizeString(functionValue?.name) ??
-        normalizeString(value.name) ??
-        normalizeString(value.toolName);
-      if (name) {
-        values.push(`[Tool Call: ${name}]`);
-      }
-    }
-  }
+function readToolCallName(value: Record<string, unknown>): string | undefined {
+  const functionValue =
+    value.function && typeof value.function === "object"
+      ? (value.function as Record<string, unknown>)
+      : undefined;
 
-  const functionCall =
-    message.function_call && typeof message.function_call === "object"
-      ? (message.function_call as Record<string, unknown>)
-      : message.functionCall && typeof message.functionCall === "object"
-        ? (message.functionCall as Record<string, unknown>)
-        : undefined;
-  const functionName = normalizeString(functionCall?.name);
-  if (functionName) {
-    values.push(`[Tool Call: ${functionName}]`);
-  }
-
-  return values;
+  return (
+    normalizeString(functionValue?.name) ??
+    normalizeString(value.name) ??
+    normalizeString(value.toolName)
+  );
 }
 
-function extractToolCallNames(message: Record<string, unknown>): string[] {
+function collectToolCallNames(message: Record<string, unknown>): string[] {
   const names = new Set<string>();
 
   const directToolName =
@@ -136,7 +110,7 @@ function extractToolCallNames(message: Record<string, unknown>): string[] {
     normalizeString(message.name) ??
     normalizeString(message.tool);
   if (directToolName) {
-    names.add(directToolName.toLowerCase());
+    names.add(directToolName);
   }
 
   const toolCalls = message.tool_calls ?? message.toolCalls;
@@ -145,17 +119,9 @@ function extractToolCallNames(message: Record<string, unknown>): string[] {
       if (!entry || typeof entry !== "object") {
         continue;
       }
-      const value = entry as Record<string, unknown>;
-      const functionValue =
-        value.function && typeof value.function === "object"
-          ? (value.function as Record<string, unknown>)
-          : undefined;
-      const name =
-        normalizeString(functionValue?.name) ??
-        normalizeString(value.name) ??
-        normalizeString(value.toolName);
+      const name = readToolCallName(entry as Record<string, unknown>);
       if (name) {
-        names.add(name.toLowerCase());
+        names.add(name);
       }
     }
   }
@@ -168,7 +134,7 @@ function extractToolCallNames(message: Record<string, unknown>): string[] {
         : undefined;
   const functionName = normalizeString(functionCall?.name);
   if (functionName) {
-    names.add(functionName.toLowerCase());
+    names.add(functionName);
   }
 
   const content = message.content;
@@ -189,12 +155,20 @@ function extractToolCallNames(message: Record<string, unknown>): string[] {
       }
       const name = normalizeString(value.name);
       if (name) {
-        names.add(name.toLowerCase());
+        names.add(name);
       }
     }
   }
 
   return Array.from(names);
+}
+
+function extractToolCallTexts(message: Record<string, unknown>): string[] {
+  return collectToolCallNames(message).map((name) => `[Tool Call: ${name}]`);
+}
+
+function extractToolCallNames(message: Record<string, unknown>): string[] {
+  return collectToolCallNames(message).map((name) => name.toLowerCase());
 }
 
 function normalizeTranscriptRole(value: unknown): TranscriptMessageRole | undefined {
@@ -204,7 +178,7 @@ function normalizeTranscriptRole(value: unknown): TranscriptMessageRole | undefi
   return undefined;
 }
 
-export function normalizeTranscriptMessage(message: unknown): TranscriptMessage | undefined {
+function normalizeTranscriptMessage(message: unknown): TranscriptMessage | undefined {
   if (!message || typeof message !== "object") {
     return undefined;
   }
@@ -235,7 +209,7 @@ export function normalizeTranscriptMessages(messages: unknown[]): TranscriptMess
   });
 }
 
-export function stripAssistantNonHumanFacingLines(text: string): string {
+function stripAssistantNonHumanFacingLines(text: string): string {
   return text
     .split("\n")
     .map((line) => line.trimEnd())
@@ -245,7 +219,7 @@ export function stripAssistantNonHumanFacingLines(text: string): string {
     .trim();
 }
 
-export function normalizeHumanFacingAssistantText(text: string): string | undefined {
+function normalizeHumanFacingAssistantText(text: string): string | undefined {
   const withoutToolLines = stripAssistantNonHumanFacingLines(text);
   const cleaned = withoutToolLines.replace(ASSISTANT_CONTROL_PREFIX, "").trim();
   return cleaned || undefined;
@@ -285,7 +259,7 @@ export function normalizeHumanFacingUserText(text: string): string | undefined {
 
 export function extractSlackThreadHistoryMessages(
   text: string,
-): Array<{ type: "user" | "assistant"; msg: string }> {
+): SlackThreadHistoryMessage[] {
   const trimmed = text.trim();
   if (!trimmed.startsWith(THREAD_HISTORY_PREFIX)) {
     return [];
@@ -304,7 +278,7 @@ export function extractSlackThreadHistoryMessages(
     return [];
   }
 
-  const messages: Array<{ type: "user" | "assistant"; msg: string }> = [];
+  const messages: SlackThreadHistoryMessage[] = [];
   for (let index = 0; index < headers.length; index += 1) {
     const current = headers[index];
     const next = headers[index + 1];
@@ -374,7 +348,7 @@ export function extractLastUserHumanFacingText(messages: unknown[]): string | un
 
 export function extractInitialSlackThreadHistoryMessages(
   messages: unknown[],
-): Array<{ type: "user" | "assistant"; msg: string }> {
+): SlackThreadHistoryMessage[] {
   const transcript = normalizeTranscriptMessages(messages);
   for (const entry of transcript) {
     if (entry.role !== "user") {

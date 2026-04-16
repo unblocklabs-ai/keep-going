@@ -1,13 +1,16 @@
 {
   "id": "keep-going",
   "name": "Keep Going",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Post-turn continuation plugin for Slack-based OpenClaw sessions",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
       "enabled": {
+        "type": "boolean"
+      },
+      "debug_logs": {
         "type": "boolean"
       },
       "channels": {

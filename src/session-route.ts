@@ -1,8 +1,9 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { normalizeString, normalizeThreadId } from "./normalize.js";
+import { resolveBaseSessionKey } from "./session-key.js";
 import type { SessionRoute } from "./types.js";
 
-export type SessionRouteEntry = {
+type SessionRouteEntry = {
   sessionFile?: string;
   spawnedBy?: string;
   modelProvider?: string;
@@ -20,7 +21,21 @@ export type SessionRouteEntry = {
   lastThreadId?: string | number;
 };
 
-export function buildSessionRouteFields(
+export type SessionRouteApi = {
+  config: {
+    session?: OpenClawPluginApi["config"]["session"];
+  };
+  runtime: {
+    agent: {
+      session: {
+        resolveStorePath: OpenClawPluginApi["runtime"]["agent"]["session"]["resolveStorePath"];
+        loadSessionStore: (storePath: string) => Record<string, SessionRouteEntry>;
+      };
+    };
+  };
+};
+
+function buildSessionRouteFields(
   entry: SessionRouteEntry,
 ): Omit<SessionRoute, "lookupStatus"> {
   const channel =
@@ -46,35 +61,19 @@ export function buildSessionRouteFields(
   };
 }
 
-export function resolveBaseSessionKey(sessionKey: string): string {
-  const marker = ":thread:";
-  const markerIndex = sessionKey.lastIndexOf(marker);
-  if (markerIndex < 0) {
-    return sessionKey;
-  }
-  return sessionKey.slice(0, markerIndex);
-}
-
-export function normalizeTrackingSessionKey(sessionKey: string): string {
-  return resolveBaseSessionKey(sessionKey.trim());
-}
-
 export function isSubagentSessionKey(sessionKey: string): boolean {
   return sessionKey.includes(":subagent:");
 }
 
 export function resolveSessionRoute(
-  api: OpenClawPluginApi,
+  api: SessionRouteApi,
   params: { agentId?: string; sessionKey: string },
 ): SessionRoute {
   try {
     const storePath = api.runtime.agent.session.resolveStorePath(api.config.session?.store, {
       agentId: params.agentId,
     });
-    const store = api.runtime.agent.session.loadSessionStore(storePath) as Record<
-      string,
-      SessionRouteEntry
-    >;
+    const store = api.runtime.agent.session.loadSessionStore(storePath);
     const baseSessionKey = resolveBaseSessionKey(params.sessionKey);
     const entry =
       store[params.sessionKey] ??

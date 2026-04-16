@@ -1,56 +1,36 @@
 # Keep Going
 
-`keep-going` is a native OpenClaw plugin for Slack-first continuation experiments.
+`keep-going` is a native OpenClaw plugin that watches completed Slack turns and starts one same-session follow-up run when an LLM validator believes the assistant stopped before the task was actually done.
 
-Its job is simple:
+The plugin is intentionally narrow:
 
-- let Turn A finish normally
-- inspect the completed run after `agent_end`
-- if the LLM validator thinks the turn appears unfinished, launch one advisory Turn B on the same session and Slack thread
-- let the main agent disagree with the nudge if it is actually done or blocked
+- Slack sessions only
+- one follow-up run per completed turn
+- no resume-in-place mutation of the original run
+- no continuation for heartbeat, cron, subagent, or spawned-session runs
 
 ## How It Works
 
-`keep-going` is post-turn, not in-turn.
+The runtime flow is:
 
-The flow is:
+1. Turn A completes normally.
+2. The plugin receives `agent_end`.
+3. The plugin reconstructs the session route and recent transcript window.
+4. The validator decides whether the assistant still owns remaining work.
+5. If yes, the plugin starts Turn B on the same session and Slack thread.
 
-- Turn A ends normally
-- the plugin receives `agent_end`
-- the plugin inspects the completed run
-- if the validator thinks the turn may be unfinished, the plugin starts Turn B
-- Turn B is a new run on the same OpenClaw session and the same Slack thread
+Turn B is advisory. It is explicitly told to stop immediately if the previous turn was already complete or truly blocked.
 
-This is important:
+## Install
 
-- it does not resume the already-ended run
-- it does not mutate Turn A after the fact
-- it does not create a brand-new unrelated user session
-
-The correct mental model is:
-
-- same session
-- new run
-
-## Remote Install
-
-This repo is set up as its own OpenClaw marketplace, so a public remote install is one command:
+Remote install:
 
 ```bash
 openclaw plugins install keep-going --marketplace unblocklabs-ai/keep-going
 openclaw plugins enable keep-going
 ```
 
-Then restart the OpenClaw gateway or process and verify:
-
-```bash
-openclaw plugins list --enabled
-openclaw plugins inspect keep-going
-```
-
-## Local Install
-
-For local iteration:
+Local iteration:
 
 ```bash
 git clone https://github.com/unblocklabs-ai/keep-going.git
@@ -58,103 +38,27 @@ openclaw plugins install --link ./keep-going
 openclaw plugins enable keep-going
 ```
 
-## Current Scope
+Then restart the gateway and verify:
 
-Current behavior is intentionally narrow:
-
-- Slack only
-- top-level sessions only
-- skips `heartbeat` and `cron` runs
-- skips while a child subagent is still in flight for the parent session
-- skips subagent and spawned-session runs
-- uses a direct OpenAI LLM validator for continuation decisions
-- launches at most one follow-up Turn B per origin run
-
-Operational details:
-
-- plugin-started continuation runs are tagged and skipped on re-entry to avoid loops
-- in-memory dedupe is pruned over time and replaced per Slack thread
-- active child subagents are tracked from live `subagent_spawned` and `subagent_ended` hooks
-- continuation launch aborts only if a newer user/assistant message appeared or another run started while validation was in progress
-- the continuation launcher reads routing, model, provider, and auth continuity from session metadata
-
-Tracker scope:
-
-- activity tracking is intentionally process-lifetime, not persistent state
-- on a gateway restart, those in-memory guards reset with the process
-- that is acceptable for this plugin because active agent runs also terminate with the gateway process
-
-The validator is advisory, not authoritative. Turn B is instructed to stop immediately if the previous turn was already complete or truly blocked.
-
-## LLM Validator
-
-The plugin uses a direct OpenAI validator.
-
-Important properties of this path:
-
-- the validator itself does not use `runEmbeddedPiAgent(...)`
-- the validator calls OpenAI directly, so it does not create a new OpenClaw run or session
-- Turn B remains the only user-visible continuation run
-
-The validator config is plugin-local and model-swappable so judge evals are easy:
-
-```json
-{
-  "validator": {
-    "llm": {
-      "model": "gpt-5.4-mini",
-      "systemPrompt": "Override only if you want to replace the built-in validator prompt.",
-      "apiKeyEnv": "KEEP_GOING_OPENAI_API_KEY",
-      "maxMessages": 10,
-      "maxChars": 20000,
-      "includeCurrentTurnOnly": true,
-      "recentUserMessages": 3,
-      "temperature": 0.2,
-      "timeoutMs": 15000
-    }
-  }
-}
+```bash
+openclaw plugins list --enabled
+openclaw plugins inspect keep-going
 ```
 
-Recommended setup:
-
-- set `KEEP_GOING_OPENAI_API_KEY` in the gateway environment
-- keep `apiKeyEnv` in plugin config
-- swap `validator.llm.model` when comparing `gpt-5.4-mini`, `gpt-5.4-nano`, or later models
-
-The validator uses a capped recent transcript window from the completed run:
-
-- `maxMessages` limits how many transcript messages are considered
-- `maxChars` caps the rendered prompt size
-- `includeCurrentTurnOnly: true` narrows the window to the last user turn when possible
-- `systemPrompt` defaults to the built-in validator prompt and can be overridden without code changes
-
-## Troubleshooting
-
-If the plugin logs `keep-going continuation launch failed`, check the main gateway log first. Plugin logs are emitted inline with the gateway log stream.
-
-Common failure classes:
-
-- wrong model/auth continuity
-- missing Slack routing metadata
-- plugin not enabled
-- session was ineligible because it was a heartbeat, cron run, subagent session, or non-Slack session
-
-For OpenAI Codex OAuth specifically, the continuation must reuse the session's persisted `openai-codex` model/auth state. If it falls back to plain `openai`, the gateway will ask for `OPENAI_API_KEY` and Turn B will fail before any user-visible reply.
-
-## Plugin Config
+## Config
 
 The plugin exposes a small config surface through `openclaw.plugin.json`:
 
 ```json
 {
   "enabled": true,
+  "debug_logs": false,
   "channels": ["slack"],
   "timeoutMs": 120000,
   "validator": {
     "llm": {
       "model": "gpt-5.4-mini",
-      "systemPrompt": "Default validator prompt string omitted here for brevity; override this to customize continuation judgment behavior.",
+      "systemPrompt": "Optional override for the built-in continuation validator prompt.",
       "apiKeyEnv": "KEEP_GOING_OPENAI_API_KEY",
       "maxMessages": 10,
       "maxChars": 20000,
@@ -169,46 +73,35 @@ The plugin exposes a small config surface through `openclaw.plugin.json`:
 
 Notes:
 
-- inline `validator.llm.apiKey` is supported, but `apiKeyEnv` is the cleaner default
-- `validator.llm.systemPrompt` lets you override the validator system prompt; if omitted, the built-in prompt is used
-- `validator.llm.recentUserMessages` controls how many recent user turns are kept when `includeCurrentTurnOnly` is true
+- `validator.llm.apiKeyEnv` is the normal way to provide credentials
+- `validator.llm.apiKey` is supported but usually not desirable
+- `includeCurrentTurnOnly` keeps the validator focused on the current task while still allowing a small amount of recent context
+- `debug_logs: true` enables structured step-by-step plugin logging; when `false`, only error logs are emitted
 
-## Repository Notes
+## Runtime Behavior
 
-- `index.ts` registers the native plugin entry
-- `src/plugin.ts` wires the `agent_end` hook and launch flow
-- `src/session-route.ts` recovers Slack routing from session metadata
-- `src/launcher.ts` launches the advisory continuation turn
-- `plan/` holds the design docs for scope and architecture
+The plugin includes a few guards to avoid bad continuations:
 
-## Status
+- plugin-started follow-up runs are tagged and skipped on re-entry
+- only top-level Slack sessions are eligible
+- the parent turn is skipped while child subagents are still active
+- continuation launch is aborted if newer session activity appears during validation
+- model, provider, auth profile, and Slack routing are reused from the existing session route
 
-This is an experiment repo, not a polished upstream-ready package yet.
+The validator is called directly against OpenAI and does not create its own OpenClaw run. The only user-visible extra run is the continuation itself.
 
-The goal is to answer one question with real usage data:
+## Development
 
-“Can a post-turn continuation nudge reduce disappointing half-finished async-worker outcomes?”
-
-Phase 1 answer was yes: the post-turn same-session continuation architecture works in practice.
-
-The continuation decision path is now LLM-only without changing the Turn B runtime path.
-
-## Local Validator Eval
-
-For quick local judge evals against a real transcript fixture:
-
-1. Copy `.env.example` to `.env`
-2. set `KEEP_GOING_OPENAI_API_KEY`
-3. optionally set `KEEP_GOING_VALIDATOR_MODEL`
-4. run:
+Run the plugin tests with:
 
 ```bash
-npm run eval:validator -- --file 42c136e7-6ba6-42e3-afd1-485aa6a99832-topic-1775879458.009949.jsonl --run latest --print-prompt
+npm test
 ```
 
-Notes:
+## Repository Layout
 
-- the eval runner reads `.env` locally
-- it splits a JSONL transcript into completed run segments using `openclaw:bootstrap-context:full`
-- `--run latest` is the default
-- the output is a compact JSON decision plus an optional prompt preview
+- `index.ts` registers the native plugin entry
+- `src/plugin.ts` wires the event hooks, validator call, and continuation launch flow
+- `src/llm-validator.ts` builds the transcript window and calls the structured validator response
+- `src/session-route.ts` restores Slack routing and auth continuity from session metadata
+- `src/launcher.ts` starts the same-session follow-up run

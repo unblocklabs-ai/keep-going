@@ -1,6 +1,6 @@
 import type { KeepGoingLlmValidatorConfig } from "./types.js";
 
-export const DEFAULT_OPENAI_VALIDATOR_CONFIG = Object.freeze<KeepGoingLlmValidatorConfig>({
+const DEFAULT_OPENAI_VALIDATOR_CONFIG = Object.freeze<KeepGoingLlmValidatorConfig>({
   provider: "openai",
   model: "gpt-5.4-mini",
   systemPrompt: `You are a completion validator for a AI Employee Agent who has agency and a bias towards action.

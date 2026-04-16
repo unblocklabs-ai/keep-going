@@ -1,5 +1,5 @@
 import { normalizeString } from "./normalize.js";
-import { normalizeTrackingSessionKey } from "./session-route.js";
+import { normalizeOptionalTrackingSessionKey } from "./session-key.js";
 
 type ActiveChildRecord = {
   childSessionKey: string;
@@ -106,7 +106,6 @@ export class ActiveSubagentTracker {
   }
 }
 
-function normalizeRequesterKey(value: unknown): string | undefined {
-  const key = normalizeString(value);
-  return key ? normalizeTrackingSessionKey(key) : undefined;
+function normalizeRequesterKey(value?: string): string | undefined {
+  return normalizeOptionalTrackingSessionKey(normalizeString(value));
 }

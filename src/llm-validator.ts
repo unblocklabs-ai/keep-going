@@ -1,8 +1,10 @@
-import { normalizeTranscriptMessages, type TranscriptMessage } from "./messages.js";
+import { normalizeTranscriptMessages } from "./messages.js";
 import { normalizeString } from "./normalize.js";
 import { resolveLlmApiKey } from "./openai-api-key.js";
 import { OPENAI_VALIDATOR_INTERNAL_DEFAULTS } from "./openai-validator-config.js";
 import { callResponsesJsonSchema } from "./responses-json-schema.js";
+import type { KeepGoingLogger } from "./logging.js";
+import type { TranscriptMessage } from "./transcript-types.js";
 import type {
   ContinuationCandidate,
   ContinuationDecision,
@@ -21,13 +23,20 @@ const CONTINUATION_DECISION_SCHEMA = {
   required: ["continue", "reason", "follow_up_instruction"],
 } as const;
 
-export type LlmValidatorInput = {
+type LlmValidatorInput = {
   candidate: ContinuationCandidate;
   config: KeepGoingLlmValidatorConfig;
   context?: ContinuationValidationContext;
+  logger?: KeepGoingLogger;
 };
 
-export type LlmValidatorOutput = ContinuationDecision & { validatorModel: string };
+type LlmValidatorOutput = ContinuationDecision & { validatorModel: string };
+
+type ParsedContinuationDecision = {
+  continue: boolean;
+  reason?: unknown;
+  follow_up_instruction?: unknown;
+};
 
 function clipText(value: string, maxChars: number): string {
   if (value.length <= maxChars) {
@@ -220,7 +229,7 @@ function normalizeDecision(
     throw new Error("validator returned a non-object response");
   }
 
-  const value = parsed as Record<string, unknown>;
+  const value = parsed as ParsedContinuationDecision;
   if (typeof value.continue !== "boolean") {
     throw new Error("validator response is missing boolean continue");
   }
@@ -250,6 +259,17 @@ export async function validateContinuationWithLlm(
     );
   }
 
+  input.logger?.step("preparing validator input", {
+    runId: input.candidate.runId,
+    sessionKey: input.candidate.sessionKey,
+    model: input.config.model,
+    includeCurrentTurnOnly: input.config.includeCurrentTurnOnly,
+    recentUserMessages: input.config.recentUserMessages,
+    candidateMessageCount: input.candidate.messages.length,
+    runTranscriptMessageCount: input.context?.runTranscriptMessages?.length ?? 0,
+    sessionTranscriptMessageCount: input.context?.sessionTranscriptMessages?.length ?? 0,
+  });
+
   const response = await callResponsesJsonSchema(
     {
       config: input.config,
@@ -258,6 +278,7 @@ export async function validateContinuationWithLlm(
       schemaName: "keep_going_decision",
       schema: CONTINUATION_DECISION_SCHEMA,
       maxOutputTokens: OPENAI_VALIDATOR_INTERNAL_DEFAULTS.maxOutputTokens,
+      logger: input.logger,
     },
     apiKey,
   );
@@ -284,5 +305,15 @@ export async function validateContinuationWithLlm(
     );
   }
 
-  return normalizeDecision(parsed, input.config.model);
+  const decision = normalizeDecision(parsed, input.config.model);
+  input.logger?.step("validator JSON parsed", {
+    runId: input.candidate.runId,
+    sessionKey: input.candidate.sessionKey,
+    continue: decision.continue,
+    reason: decision.reason,
+    hasFollowUpInstruction: Boolean(decision.followUpInstruction),
+    validatorModel: decision.validatorModel,
+  });
+
+  return decision;
 }

@@ -1,4 +1,5 @@
 import { normalizeString } from "./normalize.js";
+import type { KeepGoingLogger } from "./logging.js";
 import type { OpenAiLlmCallConfig } from "./types.js";
 
 const OPENAI_RESPONSES_API_URL = "https://api.openai.com/v1/responses";
@@ -19,8 +20,9 @@ type ResponsesJsonSchemaRequest = {
   systemPrompt: string;
   userPrompt: string;
   schemaName: string;
-  schema: object;
+  schema: Readonly<Record<string, unknown>>;
   maxOutputTokens?: number;
+  logger?: KeepGoingLogger;
 };
 
 type ResponsesJsonSchemaResult = {
@@ -90,6 +92,15 @@ export async function callResponsesJsonSchema(
   const controller = new AbortController();
   const timeoutMs = request.config.timeoutMs ?? 15_000;
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const startedAt = Date.now();
+  let failureLogged = false;
+
+  request.logger?.step("starting OpenAI validator request", {
+    model: request.config.model,
+    schemaName: request.schemaName,
+    timeoutMs,
+    maxOutputTokens: request.maxOutputTokens ?? 400,
+  });
 
   try {
     const response = await fetch(OPENAI_RESPONSES_API_URL, {
@@ -127,16 +138,47 @@ export async function callResponsesJsonSchema(
 
     if (!response.ok) {
       const responseText = clipText(await response.text(), 1000);
+      request.logger?.error("OpenAI validator request failed", {
+        model: request.config.model,
+        schemaName: request.schemaName,
+        timeoutMs,
+        durationMs: Date.now() - startedAt,
+        status: response.status,
+        statusText: response.statusText,
+        responseText,
+      });
+      failureLogged = true;
       throw new Error(
         `request failed with ${response.status} ${response.statusText}: ${responseText}`,
       );
     }
 
     const responseBody = await response.json();
-    return {
+    const result = {
       outputText: extractOutputText(responseBody),
       refusal: extractRefusalText(responseBody),
     };
+    request.logger?.step("OpenAI validator response received", {
+      model: request.config.model,
+      schemaName: request.schemaName,
+      timeoutMs,
+      durationMs: Date.now() - startedAt,
+      status: response.status,
+      hasOutputText: Boolean(result.outputText),
+      hasRefusal: Boolean(result.refusal),
+    });
+    return result;
+  } catch (error) {
+    if (!failureLogged) {
+      request.logger?.error("OpenAI validator request threw", {
+        model: request.config.model,
+        schemaName: request.schemaName,
+        timeoutMs,
+        durationMs: Date.now() - startedAt,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    throw error;
   } finally {
     clearTimeout(timeout);
   }

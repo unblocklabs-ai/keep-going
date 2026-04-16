@@ -1,6 +1,7 @@
-import { normalizeTranscriptMessages, type TranscriptMessage } from "./messages.js";
+import { normalizeTranscriptMessages } from "./messages.js";
 import { normalizeString } from "./normalize.js";
-import { normalizeTrackingSessionKey } from "./session-route.js";
+import { normalizeOptionalTrackingSessionKey } from "./session-key.js";
+import type { TranscriptMessage } from "./transcript-types.js";
 
 type ActivitySnapshot = {
   messageId?: string;
@@ -220,7 +221,6 @@ function isConversationMessage(message: unknown): boolean {
   return role === "user" || role === "assistant";
 }
 
-function normalizeSessionKey(value: unknown): string | undefined {
-  const sessionKey = normalizeString(value);
-  return sessionKey ? normalizeTrackingSessionKey(sessionKey) : undefined;
+function normalizeSessionKey(value?: string): string | undefined {
+  return normalizeOptionalTrackingSessionKey(normalizeString(value));
 }

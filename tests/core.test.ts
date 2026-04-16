@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { resolveKeepGoingConfig } from "../src/config.js";
 import { buildValidatorPrompt } from "../src/llm-validator.js";
-import { createDefaultOpenAiValidatorConfig } from "../src/openai-validator-config.js";
+import {
+  resolveContinuationSessionFile,
+  type SessionFileResolverApi,
+} from "../src/launcher.js";
 import {
   extractInitialSlackThreadHistoryMessages,
   extractLastAssistantHumanFacingText,
@@ -12,16 +15,21 @@ import {
   normalizeHumanFacingUserText,
   normalizeTranscriptMessages,
 } from "../src/messages.js";
-import { resolveContinuationSessionFile } from "../src/launcher.js";
-import { resolveSessionRoute } from "../src/session-route.js";
+import { createDefaultOpenAiValidatorConfig } from "../src/openai-validator-config.js";
+import { resolveSessionRoute, type SessionRouteApi } from "../src/session-route.js";
+import type { TranscriptMessage } from "../src/transcript-types.js";
 import type { ContinuationCandidate, KeepGoingLlmValidatorConfig } from "../src/types.js";
-import { readSampleSessionStore, readSampleTranscriptMessages } from "./fixtures.js";
 
-const SLACK_SESSION_FILE = "29a2c708-ff8a-4e05-a48e-50746cd16979-topic-1775853170.228819.jsonl";
-const SLACK_SESSION_ID = "29a2c708-ff8a-4e05-a48e-50746cd16979";
-const SLACK_SESSION_KEY = "agent:main:slack:channel:c0apws0e3s8:thread:1775853170.228819";
+const SLACK_SESSION_ID = "session-1";
+const SLACK_SESSION_KEY = "agent:main:slack:channel:c123:thread:1712345678.000100";
+const SLACK_SESSION_FILE =
+  "/Users/example/.openclaw/agents/main/sessions/session-1-topic-1712345678.000100.jsonl";
 
-function createMockApi(store: Record<string, unknown>) {
+type SessionStore = ReturnType<
+  SessionRouteApi["runtime"]["agent"]["session"]["loadSessionStore"]
+>;
+
+function createMockApi(store: SessionStore): SessionRouteApi & SessionFileResolverApi {
   return {
     config: {
       session: {
@@ -47,7 +55,7 @@ function createCandidate(messages: unknown[]): ContinuationCandidate {
     agentId: "main",
     sessionId: SLACK_SESSION_ID,
     sessionKey: SLACK_SESSION_KEY,
-    workspaceDir: "/Users/billjohansson/clawd",
+    workspaceDir: "/workspace",
     modelProviderId: "openai-codex",
     modelId: "gpt-5.4",
     success: true,
@@ -62,11 +70,23 @@ function createValidatorConfig(
   return createDefaultOpenAiValidatorConfig(overrides);
 }
 
-test("resolveSessionRoute reconstructs a real Slack thread route from sessions.json", () => {
-  const store = readSampleSessionStore();
-  const api = createMockApi(store);
+test("resolveSessionRoute reconstructs Slack delivery and auth fields", () => {
+  const store = {
+    [SLACK_SESSION_KEY]: {
+      sessionFile: SLACK_SESSION_FILE,
+      deliveryContext: {
+        channel: "slack",
+        to: "channel:C123",
+        accountId: "default",
+        threadId: "1712345678.000100",
+      },
+      modelProvider: "openai-codex",
+      model: "gpt-5.4",
+      authProfileOverride: "openai-codex:user@example.com",
+    },
+  };
 
-  const route = resolveSessionRoute(api as never, {
+  const route = resolveSessionRoute(createMockApi(store), {
     agentId: "main",
     sessionKey: SLACK_SESSION_KEY,
   });
@@ -74,81 +94,39 @@ test("resolveSessionRoute reconstructs a real Slack thread route from sessions.j
   assert.equal(route.lookupStatus, "ok");
   assert.equal(route.isSlack, true);
   assert.equal(route.channel, "slack");
-  assert.equal(route.to, "channel:C0APWS0E3S8");
+  assert.equal(route.to, "channel:C123");
   assert.equal(route.accountId, "default");
-  assert.equal(route.threadId, "1775853170.228819");
-  assert.equal(route.sessionFile, "/Users/pearlperelel/.openclaw/agents/main/sessions/29a2c708-ff8a-4e05-a48e-50746cd16979-topic-1775853170.228819.jsonl");
+  assert.equal(route.threadId, "1712345678.000100");
+  assert.equal(route.sessionFile, SLACK_SESSION_FILE);
   assert.equal(route.modelProviderId, "openai-codex");
   assert.equal(route.modelId, "gpt-5.4");
-  assert.equal(route.authProfileId, "openai-codex:pearl@perelelhealth.com");
+  assert.equal(route.authProfileId, "openai-codex:user@example.com");
 });
 
-test("resolveContinuationSessionFile preserves the existing Slack session transcript file", () => {
-  const store = readSampleSessionStore();
-  const api = createMockApi(store);
-  const route = resolveSessionRoute(api as never, {
-    agentId: "main",
-    sessionKey: SLACK_SESSION_KEY,
-  });
+test("resolveContinuationSessionFile preserves the existing session transcript file", () => {
+  const route = resolveSessionRoute(
+    createMockApi({
+      [SLACK_SESSION_KEY]: {
+        sessionFile: SLACK_SESSION_FILE,
+        deliveryContext: {
+          channel: "slack",
+        },
+      },
+    }),
+    {
+      agentId: "main",
+      sessionKey: SLACK_SESSION_KEY,
+    },
+  );
 
   assert.equal(route.lookupStatus, "ok");
 
-  const sessionFile = resolveContinuationSessionFile(api as never, {
+  const sessionFile = resolveContinuationSessionFile(createMockApi({}), {
     candidate: createCandidate([]),
     sessionRoute: route,
   });
 
-  assert.equal(
-    sessionFile,
-    "/Users/pearlperelel/.openclaw/agents/main/sessions/29a2c708-ff8a-4e05-a48e-50746cd16979-topic-1775853170.228819.jsonl",
-  );
-});
-
-test("real Slack transcript normalizes to user-facing messages and tool events", () => {
-  const messages = readSampleTranscriptMessages(SLACK_SESSION_FILE);
-  const transcript = normalizeTranscriptMessages(messages);
-
-  assert.ok(transcript.length > 0);
-  assert.equal(transcript[0]?.role, "user");
-  assert.match(transcript[0]?.text ?? "", /solid work on the pacing cron/i);
-  assert.ok(
-    transcript.some(
-      (entry) =>
-        entry.role === "assistant" && entry.text.includes("[Tool Call: read]"),
-    ),
-  );
-  assert.ok(
-    transcript.some(
-      (entry) =>
-        entry.role === "assistant" && entry.text.includes("[[reply_to_current]]"),
-    ),
-  );
-});
-
-test("validator prompt with current-turn-only excludes earlier turns from the same Slack thread", () => {
-  const messages = readSampleTranscriptMessages(SLACK_SESSION_FILE);
-  const candidate = createCandidate(messages);
-  const normalized = normalizeTranscriptMessages(messages);
-  const currentTurnStart = normalized.findLastIndex(
-    (entry) =>
-      entry.role === "user" &&
-      entry.text.includes("Send a subagent to investigate the cron itself"),
-  );
-
-  assert.notEqual(currentTurnStart, -1);
-
-  const currentTurnTranscript = normalized.slice(currentTurnStart);
-  const prompt = buildValidatorPrompt({
-    candidate,
-    config: createValidatorConfig({ includeCurrentTurnOnly: true, maxMessages: 20 }),
-    context: {
-      runTranscriptMessages: currentTurnTranscript,
-    },
-  });
-
-  assert.match(prompt, /Conversation scope: current work plus up to 3 recent user turns/);
-  assert.match(prompt, /Send a subagent to investigate the cron itself/i);
-  assert.doesNotMatch(prompt, /are you sure\?/i);
+  assert.equal(sessionFile, SLACK_SESSION_FILE);
 });
 
 test("shared default validator config matches runtime plugin defaults", () => {
@@ -160,7 +138,7 @@ test("shared default validator config matches runtime plugin defaults", () => {
 
 test("validator prompt can include up to the last three user turns from session history", () => {
   const candidate = createCandidate([]);
-  const sessionTranscript = [
+  const sessionTranscript: TranscriptMessage[] = [
     { role: "user", text: "first request that should be excluded" },
     { role: "assistant", text: "ack first request" },
     { role: "user", text: "second request: build a bridge" },
@@ -219,7 +197,7 @@ test("extractLastAssistantText ignores trailing assistant NO_REPLY messages", ()
 
 test("normalizeHumanFacingUserText strips Slack wrapper metadata", () => {
   const cleaned = normalizeHumanFacingUserText([
-    "System: [2026-04-10 10:19:39 EDT] Slack message in #pearl-maddie from Bek Akhmedov: Analyze teh logs, why did it die mid run that makes no sense",
+    "System: [2026-04-10 10:19:39 EDT] Slack message in #ops from Bek: Analyze the logs",
     "",
     "Conversation info (untrusted metadata):",
     "```json",
@@ -228,16 +206,16 @@ test("normalizeHumanFacingUserText strips Slack wrapper metadata", () => {
     "",
     "Sender (untrusted metadata):",
     "```json",
-    "{\"label\":\"Bek Akhmedov (U0AJTJTKAMD)\"}",
+    "{\"label\":\"Bek (U123)\"}",
     "```",
     "",
-    "Analyze teh logs, why did it die mid run that makes no sense",
+    "Analyze the logs",
   ].join("\n"));
 
-  assert.equal(cleaned, "Analyze teh logs, why did it die mid run that makes no sense");
+  assert.equal(cleaned, "Analyze the logs");
 });
 
-test("extract human-facing final turn messages skips control text and synthetic continuation prompts", () => {
+test("extract human-facing final turn messages skip control text and synthetic continuation prompts", () => {
   const userText = extractLastUserHumanFacingText([
     { role: "user", content: "Continue the previous task." },
     {
@@ -246,7 +224,7 @@ test("extract human-facing final turn messages skips control text and synthetic 
         {
           type: "text",
           text: [
-            "System: [2026-04-10 16:39:22 EDT] Slack message in #pearl-maddie from Bek Akhmedov: Okay, can you first have a subagent summarize the truth from that convo, and then update your memory",
+            "System: [2026-04-10 16:39:22 EDT] Slack message in #ops from Bek: Fix the worker",
             "",
             "Conversation info (untrusted metadata):",
             "```json",
@@ -255,10 +233,10 @@ test("extract human-facing final turn messages skips control text and synthetic 
             "",
             "Sender (untrusted metadata):",
             "```json",
-            "{\"label\":\"Bek Akhmedov (U0AJTJTKAMD)\"}",
+            "{\"label\":\"Bek (U123)\"}",
             "```",
             "",
-            "Okay, can you first have a subagent summarize the truth from that convo, and then update your memory",
+            "Fix the worker",
           ].join("\n"),
         },
       ],
@@ -277,10 +255,7 @@ test("extract human-facing final turn messages skips control text and synthetic 
     },
   ]);
 
-  assert.equal(
-    userText,
-    "Okay, can you first have a subagent summarize the truth from that convo, and then update your memory",
-  );
+  assert.equal(userText, "Fix the worker");
   assert.equal(assistantText, "The audit is complete.");
 });
 
@@ -298,16 +273,16 @@ test("normalizeHumanFacingUserText skips internal runtime wake-up messages", () 
 test("extractSlackThreadHistoryMessages parses embedded Slack history entries", () => {
   const messages = extractSlackThreadHistoryMessages([
     "[Thread history - for context]",
-    "[Slack Bek Akhmedov (user) Fri 2026-04-10 16:32 EDT] Root user request",
-    "[slack message id: 1775853170.228819 channel: C0APWS0E3S8]",
+    "[Slack Bek (user) Fri 2026-04-10 16:32 EDT] Root user request",
+    "[slack message id: 1775853170.228819 channel: C123]",
     "",
     "[Slack Pearl (assistant) Fri 2026-04-10 16:33 EDT] First assistant reply",
-    "[slack message id: 1775853235.857849 channel: C0APWS0E3S8]",
+    "[slack message id: 1775853235.857849 channel: C123]",
     "",
     "[Slack Pearl (assistant) Fri 2026-04-10 16:33 EDT] Second assistant reply",
-    "[slack message id: 1775853235.997439 channel: C0APWS0E3S8]",
+    "[slack message id: 1775853235.997439 channel: C123]",
     "",
-    "System: [2026-04-10 16:38:05 EDT] Slack message in #pearl-maddie from Bek Akhmedov: are you sure?",
+    "System: [2026-04-10 16:38:05 EDT] Slack message in #ops from Bek: are you sure?",
   ].join("\n"));
 
   assert.deepEqual(messages, [
@@ -317,7 +292,7 @@ test("extractSlackThreadHistoryMessages parses embedded Slack history entries", 
   ]);
 });
 
-test("extractInitialSlackThreadHistoryMessages returns the first embedded thread history from transcript messages", () => {
+test("extractInitialSlackThreadHistoryMessages returns the first embedded thread history", () => {
   const history = extractInitialSlackThreadHistoryMessages([
     {
       role: "user",
@@ -327,9 +302,9 @@ test("extractInitialSlackThreadHistoryMessages returns the first embedded thread
           text: [
             "[Thread history - for context]",
             "[Slack Pearl (assistant) Fri 2026-04-10 09:49 EDT] Initial assistant post",
-            "[slack message id: 1775828941.576599 channel: C0APWS0E3S8]",
+            "[slack message id: 1775828941.576599 channel: C123]",
             "",
-            "System: [2026-04-10 10:18:00 EDT] Slack message in #pearl-maddie from Bek Akhmedov: what failed here?",
+            "System: [2026-04-10 10:18:00 EDT] Slack message in #ops from Bek: what failed here?",
             "",
             "what failed here?",
           ].join("\n"),
@@ -342,7 +317,5 @@ test("extractInitialSlackThreadHistoryMessages returns the first embedded thread
     },
   ]);
 
-  assert.deepEqual(history, [
-    { type: "assistant", msg: "Initial assistant post" },
-  ]);
+  assert.deepEqual(history, [{ type: "assistant", msg: "Initial assistant post" }]);
 });

@@ -1,3 +1,5 @@
+import type { TranscriptMessage } from "./transcript-types.js";
+
 export type KeepGoingLlmValidatorProvider = "openai";
 
 export type OpenAiLlmCallConfig = {
@@ -19,6 +21,7 @@ export type KeepGoingLlmValidatorConfig = OpenAiLlmCallConfig & {
 
 export type KeepGoingPluginConfig = {
   enabled: boolean;
+  debug_logs: boolean;
   channels: string[];
   timeoutMs?: number;
   validator: {
@@ -50,8 +53,8 @@ export type ContinuationDecision = {
 };
 
 export type ContinuationValidationContext = {
-  runTranscriptMessages?: import("./messages.js").TranscriptMessage[];
-  sessionTranscriptMessages?: import("./messages.js").TranscriptMessage[];
+  runTranscriptMessages?: TranscriptMessage[];
+  sessionTranscriptMessages?: TranscriptMessage[];
 };
 
 export type SessionRoute = {

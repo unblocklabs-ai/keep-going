@@ -1,7 +1,7 @@
 {
   "name": "@unblocklabs-ai/openclaw-keep-going",
-  "version": "0.1.6",
-  "description": "OpenClaw plugin that nudges unfinished agent turns to continue on the same Slack thread",
+  "version": "0.1.7",
+  "description": "OpenClaw plugin that starts a same-session follow-up run when the validator sees unfinished work",
   "type": "module",
   "repository": {
     "type": "git",
@@ -19,23 +19,21 @@
     "continuation"
   ],
   "scripts": {
-    "test": "node --import ../openclaw/node_modules/tsx/dist/loader.mjs --test tests/**/*.test.ts",
-    "eval:validator": "node --import ../openclaw/node_modules/tsx/dist/loader.mjs ./scripts/eval-validator.ts",
-    "replay:session": "node --import ../openclaw/node_modules/tsx/dist/loader.mjs ./scripts/replay-session.ts",
-    "export:truth-table": "node --import ../openclaw/node_modules/tsx/dist/loader.mjs ./scripts/export-truth-table.ts",
-    "label:truth-table": "node --import ../openclaw/node_modules/tsx/dist/loader.mjs ./scripts/label-truth-table.ts",
-    "clean:session": "node --import ../openclaw/node_modules/tsx/dist/loader.mjs ./scripts/clean-session.ts"
+    "test": "node --import tsx --test tests/**/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "files": [
     "index.ts",
     "src",
-    "plan",
     "README.md",
     "openclaw.plugin.json",
     ".claude-plugin/marketplace.json"
   ],
   "devDependencies": {
-    "@openclaw/plugin-sdk": "workspace:*"
+    "@types/node": "^24.6.0",
+    "openclaw": "2026.4.11",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
   },
   "openclaw": {
     "extensions": [

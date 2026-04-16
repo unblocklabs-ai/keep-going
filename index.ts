@@ -4,7 +4,7 @@ import { registerKeepGoingPlugin } from "./src/plugin.js";
 export default definePluginEntry({
   id: "keep-going",
   name: "Keep Going",
-  description: "Prototype plugin scaffold for continuation validation experiments",
+  description: "Continuation plugin that starts a follow-up run for unfinished Slack turns",
   register(api) {
     registerKeepGoingPlugin(api);
   },

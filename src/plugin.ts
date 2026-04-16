@@ -5,6 +5,7 @@ import { KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX } from "./constants.js";
 import { OneShotDedupe } from "./dedupe.js";
 import { launchContinuation, resolveContinuationSessionFile } from "./launcher.js";
 import { validateContinuationWithLlm } from "./llm-validator.js";
+import { createKeepGoingLogger, type KeepGoingLogger } from "./logging.js";
 import { lastAssistantHasSubagentSpawnToolCall } from "./messages.js";
 import { SessionActivityTracker } from "./session-activity.js";
 import { isSubagentSessionKey, resolveSessionRoute } from "./session-route.js";
@@ -35,16 +36,10 @@ type AgentContext = {
   channelId?: string;
 };
 
-type Logger = {
-  debug?: (message: string, meta?: Record<string, unknown>) => void;
-  info: (message: string, meta?: Record<string, unknown>) => void;
-  warn: (message: string, meta?: Record<string, unknown>) => void;
-};
-
 type KeepGoingRuntime = {
   api: OpenClawPluginApi;
   config: KeepGoingPluginConfig;
-  logger: Logger;
+  logger: KeepGoingLogger;
   dedupe: OneShotDedupe;
   activeSubagents: ActiveSubagentTracker;
   sessionActivity: SessionActivityTracker;
@@ -112,11 +107,19 @@ function buildCandidate(
 }
 
 function logSkip(
-  logger: Logger,
+  logger: KeepGoingLogger,
   reason: string,
   metadata?: Record<string, unknown>,
 ): void {
-  logger.debug?.(`keep-going skipped: ${reason}`, metadata);
+  logger.step(`skip: ${reason}`, metadata);
+}
+
+function getMessageRole(message: unknown): string | undefined {
+  if (!message || typeof message !== "object") {
+    return undefined;
+  }
+  const role = (message as { role?: unknown }).role;
+  return typeof role === "string" ? role : undefined;
 }
 
 function isResolvedSessionRoute(route: SessionRoute): route is ResolvedSessionRoute {
@@ -237,9 +240,18 @@ function resolveEligibleContinuationContext(
     agentId: ctx.agentId,
     sessionKey: candidate.sessionKey,
   });
+  logger.step("resolved session route", {
+    runId: candidate.runId,
+    sessionKey: candidate.sessionKey,
+    lookupStatus: route.lookupStatus,
+    isSlack: route.isSlack,
+    channel: route.channel,
+    threadId: route.threadId,
+    spawnedBy: route.spawnedBy,
+  });
 
   if (route.lookupStatus === "error") {
-    logger.warn("keep-going skipped: session lookup failed", {
+    logger.error("session lookup failed", {
       runId: candidate.runId,
       sessionKey: candidate.sessionKey,
       error: route.error,
@@ -278,6 +290,13 @@ function resolveEligibleContinuationContext(
     sessionKey: candidate.sessionKey,
     runId: candidate.runId,
   });
+  logger.step("prepared continuation context", {
+    runId: candidate.runId,
+    sessionKey: candidate.sessionKey,
+    sessionFile,
+    dedupeKey,
+    threadId: route.threadId,
+  });
   if (dedupe.has(dedupeKey)) {
     logSkip(logger, "already retriggered", {
       runId: candidate.runId,
@@ -300,24 +319,43 @@ async function evaluateDecision(
   candidate: ContinuationCandidate,
 ): Promise<EvaluatedDecision | undefined> {
   const { config, logger, sessionActivity, deps } = runtime;
+  const runTranscriptMessages = sessionActivity.getRunTranscriptMessages(candidate.runId);
+  const sessionTranscriptMessages = sessionActivity.getSessionTranscriptMessages(
+    candidate.sessionKey,
+  );
+
+  logger.step("starting validator", {
+    runId: candidate.runId,
+    sessionKey: candidate.sessionKey,
+    validatorModel: config.validator.llm.model,
+    runTranscriptMessageCount: runTranscriptMessages.length,
+    sessionTranscriptMessageCount: sessionTranscriptMessages.length,
+  });
 
   try {
     const decision = await deps.validateContinuationWithLlm({
       candidate,
       config: config.validator.llm,
       context: {
-        runTranscriptMessages: sessionActivity.getRunTranscriptMessages(candidate.runId),
-        sessionTranscriptMessages: sessionActivity.getSessionTranscriptMessages(
-          candidate.sessionKey,
-        ),
+        runTranscriptMessages,
+        sessionTranscriptMessages,
       },
+      logger,
+    });
+    logger.step("validator completed", {
+      runId: candidate.runId,
+      sessionKey: candidate.sessionKey,
+      continue: decision.continue,
+      reason: decision.reason,
+      hasFollowUpInstruction: Boolean(decision.followUpInstruction),
+      validatorModel: decision.validatorModel,
     });
     return {
       decision,
       validatorModel: decision.validatorModel,
     };
   } catch (error) {
-    logger.warn("keep-going skipped: llm validator failed", {
+    logger.error("llm validator failed", {
       runId: candidate.runId,
       sessionKey: candidate.sessionKey,
       model: config.validator.llm.model,
@@ -384,17 +422,33 @@ async function launchEligibleContinuation(
     reason: decision.reason,
     threadId: route.threadId,
   });
+  logger.step("recorded continuation dedupe entry", {
+    runId: candidate.runId,
+    sessionKey: candidate.sessionKey,
+    dedupeKey,
+    reason: decision.reason,
+    threadId: route.threadId,
+  });
 
   try {
+    logger.step("launching continuation", {
+      runId: candidate.runId,
+      sessionKey: candidate.sessionKey,
+      sessionFile,
+      threadId: route.threadId,
+      timeoutMs: normalizeTimeoutMs(api, config.timeoutMs),
+      reason: decision.reason,
+      ...(validatorModel ? { validatorModel } : {}),
+    });
     const launchResult = await deps.launchContinuation(api, {
       candidate,
       decision,
       sessionRoute: route,
       sessionFile,
       timeoutMs: normalizeTimeoutMs(api, config.timeoutMs),
-    });
+    }, logger);
     dedupe.setLaunchedFollowUpRunId(dedupeKey, launchResult.followUpRunId);
-    logger.info("keep-going launched continuation", {
+    logger.step("launched continuation", {
       runId: candidate.runId,
       followUpRunId: launchResult.followUpRunId,
       sessionKey: candidate.sessionKey,
@@ -403,7 +457,7 @@ async function launchEligibleContinuation(
       ...(validatorModel ? { validatorModel } : {}),
     });
   } catch (error) {
-    logger.warn("keep-going continuation launch failed", {
+    logger.error("continuation launch failed", {
       runId: candidate.runId,
       sessionKey: candidate.sessionKey,
       reason: decision.reason,
@@ -421,15 +475,32 @@ export function registerKeepGoingPlugin(
   const runtime: KeepGoingRuntime = {
     api,
     config,
-    logger: api.runtime.logging.getChildLogger({ plugin: api.id }),
+    logger: createKeepGoingLogger(
+      api.runtime.logging.getChildLogger({ plugin: api.id }),
+      config.debug_logs,
+    ),
     dedupe: new OneShotDedupe(),
     activeSubagents: new ActiveSubagentTracker(),
     sessionActivity: new SessionActivityTracker(),
     deps,
   };
 
+  runtime.logger.step("registered", {
+    enabled: config.enabled,
+    debug_logs: config.debug_logs,
+    channels: config.channels,
+    timeoutMs: config.timeoutMs,
+    validatorModel: config.validator.llm.model,
+  });
+
   api.runtime.events.onSessionTranscriptUpdate((update) => {
     runtime.sessionActivity.recordTranscriptUpdate(update);
+    runtime.logger.step("recorded session transcript update", {
+      sessionKey: update.sessionKey,
+      sessionFile: update.sessionFile,
+      messageId: update.messageId,
+      role: getMessageRole(update.message),
+    });
   });
 
   api.runtime.events.onAgentEvent((event) => {
@@ -442,6 +513,11 @@ export function registerKeepGoingPlugin(
         sessionKey: event.sessionKey,
         runId: event.runId,
       });
+      runtime.logger.step("observed lifecycle error event", {
+        sessionKey: event.sessionKey,
+        runId: event.runId,
+        phase,
+      });
     }
   });
 
@@ -450,12 +526,31 @@ export function registerKeepGoingPlugin(
       sessionKey: ctx.sessionKey,
       runId: ctx.runId,
     });
+    runtime.logger.step("before_model_resolve", {
+      runId: ctx.runId,
+      agentId: ctx.agentId,
+      sessionId: ctx.sessionId,
+      sessionKey: ctx.sessionKey,
+      workspaceDir: ctx.workspaceDir,
+      modelProviderId: ctx.modelProviderId,
+      modelId: ctx.modelId,
+      messageProvider: ctx.messageProvider,
+      trigger: ctx.trigger,
+      channelId: ctx.channelId,
+    });
   });
 
   api.on("subagent_spawned", (event, ctx) => {
     runtime.activeSubagents.markSpawned({
       requesterSessionKey: ctx.requesterSessionKey,
       childSessionKey: event.childSessionKey,
+    });
+    runtime.logger.step("subagent spawned", {
+      requesterSessionKey: ctx.requesterSessionKey,
+      childSessionKey: event.childSessionKey,
+      activeChildSessionKeys: runtime.activeSubagents.getActiveChildSessionKeys(
+        ctx.requesterSessionKey,
+      ),
     });
   });
 
@@ -467,6 +562,13 @@ export function registerKeepGoingPlugin(
       requesterSessionKey: ctx.requesterSessionKey,
       childSessionKey: event.targetSessionKey,
     });
+    runtime.logger.step("subagent ended", {
+      requesterSessionKey: ctx.requesterSessionKey,
+      childSessionKey: event.targetSessionKey,
+      activeChildSessionKeys: runtime.activeSubagents.getActiveChildSessionKeys(
+        ctx.requesterSessionKey,
+      ),
+    });
   });
 
   api.on("agent_end", async (event, ctx) => {
@@ -474,9 +576,22 @@ export function registerKeepGoingPlugin(
       sessionKey: ctx.sessionKey,
       runId: ctx.runId,
     });
+    runtime.logger.step("agent_end received", {
+      runId: ctx.runId,
+      sessionId: ctx.sessionId,
+      sessionKey: ctx.sessionKey,
+      success: event.success,
+      durationMs: event.durationMs,
+      trigger: ctx.trigger,
+      messageCount: event.messages.length,
+    });
 
     try {
       if (!runtime.config.enabled) {
+        runtime.logger.step("plugin disabled; skipping agent_end handling", {
+          runId: ctx.runId,
+          sessionKey: ctx.sessionKey,
+        });
         return;
       }
 
@@ -497,6 +612,10 @@ export function registerKeepGoingPlugin(
       await launchEligibleContinuation(runtime, eligible, evaluated);
     } finally {
       runtime.sessionActivity.clearRun(ctx.runId);
+      runtime.logger.step("cleared run tracking", {
+        runId: ctx.runId,
+        sessionKey: ctx.sessionKey,
+      });
     }
   });
 }

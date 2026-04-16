@@ -5,6 +5,7 @@ import type { KeepGoingPluginConfig } from "./types.js";
 
 const DEFAULT_CONFIG: KeepGoingPluginConfig = {
   enabled: true,
+  debug_logs: false,
   channels: ["slack"],
   validator: {
     llm: createDefaultOpenAiValidatorConfig(),
@@ -50,6 +51,7 @@ export function resolveKeepGoingConfig(raw: unknown): KeepGoingPluginConfig {
 
   return {
     enabled: config.enabled !== false,
+    debug_logs: normalizeBoolean(config.debug_logs, DEFAULT_CONFIG.debug_logs),
     channels: channels.length > 0 ? channels : DEFAULT_CONFIG.channels,
     timeoutMs: normalizePositiveInteger(config.timeoutMs),
     validator: {
