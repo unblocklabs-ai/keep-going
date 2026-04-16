@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { OpenClawPluginApi, RuntimeLogger } from "openclaw/plugin-sdk";
 import { registerKeepGoingPlugin } from "../src/plugin.js";
-import type { ContinuationValidationContext } from "../src/types.js";
+import type { ContinuationValidationContext, LaunchContinuationParams } from "../src/types.js";
 
 const SESSION_KEY = "agent:main:slack:channel:c123:thread:1712345678.000100";
 const SESSION_FILE = "/virtual/session.jsonl";
@@ -60,6 +60,11 @@ function createMockApi(pluginConfig: Record<string, unknown> = { enabled: true }
     config: {
       session: {
         store: "/virtual/sessions.json",
+      },
+      channels: {
+        slack: {
+          replyToMode: "all",
+        },
       },
     },
     runtime: {
@@ -210,6 +215,71 @@ test("before_model_resolve still marks runs active for validator transcript cont
   assert.deepEqual(validatorCalls[0]?.context?.sessionTranscriptMessages, [
     { role: "assistant", text: "I still need to finish the task." },
   ]);
+});
+
+test("continuation launch reuses the last inbound Slack message id and reply context", async () => {
+  const { api, hooks, emitTranscriptUpdate } = createMockApi({ enabled: true, debug_logs: true });
+  const launchCalls: LaunchContinuationParams[] = [];
+
+  registerKeepGoingPlugin(api, {
+    validateContinuationWithLlm: async () => ({
+      continue: true,
+      reason: "unfinished work remains",
+      validatorModel: "gpt-5.4-mini",
+    }),
+    launchContinuation: async (_api, params) => {
+      launchCalls.push(params);
+      return { followUpRunId: "follow-up-1" };
+    },
+  });
+
+  const beforeModelResolve = hooks.get("before_model_resolve");
+  const agentEnd = hooks.get("agent_end");
+  const runContext = createRunContext();
+
+  await beforeModelResolve?.({ prompt: "Please continue the task." }, runContext);
+
+  emitTranscriptUpdate({
+    sessionFile: SESSION_FILE,
+    sessionKey: SESSION_KEY,
+    messageId: "1776309280.777379",
+    message: {
+      role: "user",
+      content: [
+        {
+          type: "input_text",
+          text: [
+            "System: [2026-04-16 03:13:57 UTC] Slack message in #proj-openclaw from Bek: Did the plugin wake you?",
+            "",
+            "Did the plugin wake you?",
+          ].join("\n"),
+        },
+      ],
+    },
+  });
+  emitTranscriptUpdate({
+    sessionFile: SESSION_FILE,
+    sessionKey: SESSION_KEY,
+    messageId: "assistant-msg-1",
+    message: {
+      role: "assistant",
+      content: [{ type: "output_text", text: "I should investigate that next." }],
+    },
+  });
+
+  await agentEnd?.(
+    {
+      success: true,
+      messages: [],
+    },
+    runContext,
+  );
+
+  assert.equal(launchCalls.length, 1);
+  assert.equal(launchCalls[0]?.wakeContext.currentMessageId, "1776309280.777379");
+  assert.equal(launchCalls[0]?.wakeContext.currentChannelId, "C123");
+  assert.equal(launchCalls[0]?.wakeContext.currentThreadTs, "1712345678.000100");
+  assert.equal(launchCalls[0]?.wakeContext.replyToMode, "all");
 });
 
 test("debug_logs emits prefixed step logs when enabled", async () => {

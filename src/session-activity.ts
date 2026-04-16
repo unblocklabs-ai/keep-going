@@ -7,6 +7,10 @@ type ActivitySnapshot = {
   messageId?: string;
 };
 
+type UserMessageSnapshot = {
+  messageId: string;
+};
+
 type GuardSnapshot = {
   sessionKey?: ActivitySnapshot;
   sessionFile?: ActivitySnapshot;
@@ -29,6 +33,8 @@ export class SessionActivityTracker {
   private readonly transcriptMessagesBySessionKey = new Map<string, TranscriptMessage[]>();
   private readonly transcriptBySessionKey = new Map<string, ActivitySnapshot>();
   private readonly transcriptBySessionFile = new Map<string, ActivitySnapshot>();
+  private readonly lastUserMessageBySessionKey = new Map<string, UserMessageSnapshot>();
+  private readonly lastUserMessageBySessionFile = new Map<string, UserMessageSnapshot>();
   private readonly endedRunAtByRunId = new Map<string, number>();
 
   markRunStarted(params: { sessionKey?: string; runId?: string }): void {
@@ -119,6 +125,16 @@ export class SessionActivityTracker {
     if (sessionKey) {
       this.transcriptBySessionKey.set(sessionKey, { messageId });
     }
+
+    if (getMessageRole(update.message) !== "user") {
+      return;
+    }
+
+    const userSnapshot: UserMessageSnapshot = { messageId };
+    this.lastUserMessageBySessionFile.set(sessionFile, userSnapshot);
+    if (sessionKey) {
+      this.lastUserMessageBySessionKey.set(sessionKey, userSnapshot);
+    }
   }
 
   captureSnapshot(params: { sessionKey?: string; sessionFile?: string }): GuardSnapshot {
@@ -166,6 +182,20 @@ export class SessionActivityTracker {
       return [];
     }
     return [...(this.transcriptMessagesBySessionKey.get(key) ?? [])];
+  }
+
+  getLatestUserMessageId(params: { sessionKey?: string; sessionFile?: string }): string | undefined {
+    this.pruneStaleRunState(Date.now());
+    const sessionKey = normalizeSessionKey(params.sessionKey);
+    const bySessionKey = sessionKey
+      ? this.lastUserMessageBySessionKey.get(sessionKey)?.messageId
+      : undefined;
+    if (bySessionKey) {
+      return bySessionKey;
+    }
+
+    const sessionFile = normalizeString(params.sessionFile);
+    return sessionFile ? this.lastUserMessageBySessionFile.get(sessionFile)?.messageId : undefined;
   }
 
   clearRun(runId?: string): void {
@@ -219,6 +249,15 @@ function isConversationMessage(message: unknown): boolean {
   }
   const role = (message as { role?: unknown }).role;
   return role === "user" || role === "assistant";
+}
+
+function getMessageRole(message: unknown): string | undefined {
+  if (!message || typeof message !== "object") {
+    return undefined;
+  }
+
+  const role = (message as { role?: unknown }).role;
+  return typeof role === "string" ? role : undefined;
 }
 
 function normalizeSessionKey(value?: string): string | undefined {

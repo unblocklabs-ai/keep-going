@@ -1,6 +1,7 @@
 import type { TranscriptMessage } from "./transcript-types.js";
 
 export type KeepGoingLlmValidatorProvider = "openai";
+export type SlackReplyToMode = "off" | "first" | "all" | "batched";
 
 export type OpenAiLlmCallConfig = {
   provider: KeepGoingLlmValidatorProvider;
@@ -64,6 +65,8 @@ export type SessionRoute = {
   to?: string;
   accountId?: string;
   threadId?: string;
+  currentChannelId?: string;
+  replyToMode?: SlackReplyToMode;
   spawnedBy?: string;
   sessionFile?: string;
   modelProviderId?: string;
@@ -72,10 +75,18 @@ export type SessionRoute = {
   error?: string;
 };
 
+export type ContinuationWakeContext = {
+  currentMessageId?: string;
+  currentChannelId?: string;
+  currentThreadTs?: string;
+  replyToMode?: SlackReplyToMode;
+};
+
 export type LaunchContinuationParams = {
   candidate: ContinuationCandidate;
   decision: ContinuationDecision;
   sessionRoute: SessionRoute;
+  wakeContext: ContinuationWakeContext;
   sessionFile: string;
   timeoutMs: number;
 };

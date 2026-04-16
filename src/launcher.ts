@@ -55,6 +55,10 @@ export async function launchContinuation(
     timeoutMs: params.timeoutMs,
     threadId: params.sessionRoute.threadId,
     channel: params.sessionRoute.channel,
+    currentChannelId: params.wakeContext.currentChannelId,
+    currentThreadTs: params.wakeContext.currentThreadTs,
+    currentMessageId: params.wakeContext.currentMessageId,
+    replyToMode: params.wakeContext.replyToMode,
     hasAuthProfileId: Boolean(params.sessionRoute.authProfileId),
     hasFollowUpInstruction: Boolean(params.decision.followUpInstruction),
   });
@@ -77,6 +81,10 @@ export async function launchContinuation(
     messageTo: params.sessionRoute.to,
     messageThreadId: params.sessionRoute.threadId,
     agentAccountId: params.sessionRoute.accountId,
+    currentChannelId: params.wakeContext.currentChannelId,
+    currentThreadTs: params.wakeContext.currentThreadTs,
+    currentMessageId: params.wakeContext.currentMessageId,
+    replyToMode: params.wakeContext.replyToMode,
     extraSystemPrompt,
   });
 
@@ -86,6 +94,7 @@ export async function launchContinuation(
     sessionId: params.candidate.sessionId,
     sessionKey: params.candidate.sessionKey,
     threadId: params.sessionRoute.threadId,
+    currentMessageId: params.wakeContext.currentMessageId,
   });
 
   return { followUpRunId };

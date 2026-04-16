@@ -1,7 +1,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { normalizeString, normalizeThreadId } from "./normalize.js";
 import { resolveBaseSessionKey } from "./session-key.js";
-import type { SessionRoute } from "./types.js";
+import type { SessionRoute, SlackReplyToMode } from "./types.js";
 
 type SessionRouteEntry = {
   sessionFile?: string;
@@ -24,6 +24,7 @@ type SessionRouteEntry = {
 export type SessionRouteApi = {
   config: {
     session?: OpenClawPluginApi["config"]["session"];
+    channels?: OpenClawPluginApi["config"]["channels"];
   };
   runtime: {
     agent: {
@@ -35,7 +36,39 @@ export type SessionRouteApi = {
   };
 };
 
+function deriveSlackChannelId(to?: string): string | undefined {
+  const normalizedTo = normalizeString(to);
+  if (!normalizedTo) {
+    return undefined;
+  }
+
+  const match = /^(?:channel|conversation):(.+)$/.exec(normalizedTo);
+  return match?.[1] ? normalizeString(match[1]) : undefined;
+}
+
+function resolveSlackReplyToMode(
+  config: SessionRouteApi["config"],
+  to?: string,
+): SlackReplyToMode | undefined {
+  const slackConfig = config.channels?.slack;
+  if (!slackConfig) {
+    return undefined;
+  }
+
+  const isDirectMessage = normalizeString(to)?.startsWith("user:") ?? false;
+  if (isDirectMessage) {
+    return (
+      slackConfig.replyToModeByChatType?.direct ??
+      slackConfig.replyToMode ??
+      slackConfig.dm?.replyToMode
+    );
+  }
+
+  return slackConfig.replyToModeByChatType?.channel ?? slackConfig.replyToMode;
+}
+
 function buildSessionRouteFields(
+  config: SessionRouteApi["config"],
   entry: SessionRouteEntry,
 ): Omit<SessionRoute, "lookupStatus"> {
   const channel =
@@ -53,6 +86,8 @@ function buildSessionRouteFields(
     to,
     accountId,
     threadId,
+    currentChannelId: channel === "slack" ? deriveSlackChannelId(to) : undefined,
+    replyToMode: channel === "slack" ? resolveSlackReplyToMode(config, to) : undefined,
     spawnedBy: normalizeString(entry.spawnedBy),
     sessionFile: normalizeString(entry.sessionFile),
     modelProviderId: normalizeString(entry.modelProvider),
@@ -84,7 +119,7 @@ export function resolveSessionRoute(
 
     return {
       lookupStatus: "ok",
-      ...buildSessionRouteFields(entry),
+      ...buildSessionRouteFields(api.config, entry),
     };
   } catch (error) {
     return {

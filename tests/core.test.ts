@@ -35,6 +35,11 @@ function createMockApi(store: SessionStore): SessionRouteApi & SessionFileResolv
       session: {
         store: "/virtual/sessions.json",
       },
+      channels: {
+        slack: {
+          replyToMode: "first",
+        },
+      },
     },
     runtime: {
       agent: {
@@ -97,6 +102,8 @@ test("resolveSessionRoute reconstructs Slack delivery and auth fields", () => {
   assert.equal(route.to, "channel:C123");
   assert.equal(route.accountId, "default");
   assert.equal(route.threadId, "1712345678.000100");
+  assert.equal(route.currentChannelId, "C123");
+  assert.equal(route.replyToMode, "first");
   assert.equal(route.sessionFile, SLACK_SESSION_FILE);
   assert.equal(route.modelProviderId, "openai-codex");
   assert.equal(route.modelId, "gpt-5.4");

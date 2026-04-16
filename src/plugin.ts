@@ -11,6 +11,7 @@ import { SessionActivityTracker } from "./session-activity.js";
 import { isSubagentSessionKey, resolveSessionRoute } from "./session-route.js";
 import type {
   ContinuationCandidate,
+  ContinuationWakeContext,
   ContinuationDecision,
   KeepGoingPluginConfig,
   SessionRoute,
@@ -50,6 +51,7 @@ type EligibleContinuationContext = {
   candidate: ContinuationCandidate;
   dedupeKey: string;
   route: SessionRoute & { lookupStatus: "ok" };
+  wakeContext: ContinuationWakeContext;
   sessionFile: string;
   transcriptSnapshot: ReturnType<SessionActivityTracker["captureSnapshot"]>;
 };
@@ -281,6 +283,15 @@ function resolveEligibleContinuationContext(
     candidate,
     sessionRoute: route,
   });
+  const wakeContext: ContinuationWakeContext = {
+    currentMessageId: sessionActivity.getLatestUserMessageId({
+      sessionKey: candidate.sessionKey,
+      sessionFile,
+    }),
+    currentChannelId: route.currentChannelId,
+    currentThreadTs: route.threadId,
+    replyToMode: route.replyToMode,
+  };
   const transcriptSnapshot = sessionActivity.captureSnapshot({
     sessionKey: candidate.sessionKey,
     sessionFile,
@@ -296,6 +307,9 @@ function resolveEligibleContinuationContext(
     sessionFile,
     dedupeKey,
     threadId: route.threadId,
+    currentMessageId: wakeContext.currentMessageId,
+    currentChannelId: wakeContext.currentChannelId,
+    replyToMode: wakeContext.replyToMode,
   });
   if (dedupe.has(dedupeKey)) {
     logSkip(logger, "already retriggered", {
@@ -309,6 +323,7 @@ function resolveEligibleContinuationContext(
     candidate,
     dedupeKey,
     route,
+    wakeContext,
     sessionFile,
     transcriptSnapshot,
   };
@@ -414,7 +429,7 @@ async function launchEligibleContinuation(
   evaluated: EvaluatedDecision,
 ): Promise<void> {
   const { config, logger, dedupe, api, deps } = runtime;
-  const { candidate, dedupeKey, route, sessionFile } = context;
+  const { candidate, dedupeKey, route, wakeContext, sessionFile } = context;
   const { decision, validatorModel } = evaluated;
 
   dedupe.record(dedupeKey, {
@@ -436,6 +451,9 @@ async function launchEligibleContinuation(
       sessionKey: candidate.sessionKey,
       sessionFile,
       threadId: route.threadId,
+      currentMessageId: wakeContext.currentMessageId,
+      currentChannelId: wakeContext.currentChannelId,
+      replyToMode: wakeContext.replyToMode,
       timeoutMs: normalizeTimeoutMs(api, config.timeoutMs),
       reason: decision.reason,
       ...(validatorModel ? { validatorModel } : {}),
@@ -444,6 +462,7 @@ async function launchEligibleContinuation(
       candidate,
       decision,
       sessionRoute: route,
+      wakeContext,
       sessionFile,
       timeoutMs: normalizeTimeoutMs(api, config.timeoutMs),
     }, logger);
