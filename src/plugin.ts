@@ -54,6 +54,7 @@ type EligibleContinuationContext = {
   wakeContext: ContinuationWakeContext;
   sessionFile: string;
   transcriptSnapshot: ReturnType<SessionActivityTracker["captureSnapshot"]>;
+  runStartBarrier: ReturnType<SessionActivityTracker["captureRunStartBarrier"]>;
 };
 
 type EvaluatedDecision = {
@@ -223,6 +224,7 @@ function resolveEligibleContinuationContext(
   runtime: KeepGoingRuntime,
   event: AgentEndEvent,
   ctx: AgentContext,
+  runStartBarrier: ReturnType<SessionActivityTracker["captureRunStartBarrier"]>,
 ): EligibleContinuationContext | undefined {
   const { api, config, logger, dedupe, activeSubagents, sessionActivity } = runtime;
 
@@ -326,6 +328,7 @@ function resolveEligibleContinuationContext(
     wakeContext,
     sessionFile,
     transcriptSnapshot,
+    runStartBarrier,
   };
 }
 
@@ -386,7 +389,7 @@ function shouldAbortBeforeLaunch(
   evaluated: EvaluatedDecision,
 ): boolean {
   const { logger, sessionActivity } = runtime;
-  const { candidate, route, sessionFile, transcriptSnapshot } = context;
+  const { candidate, route, sessionFile, transcriptSnapshot, runStartBarrier } = context;
   const { decision, validatorModel } = evaluated;
 
   if (!decision.continue) {
@@ -398,10 +401,18 @@ function shouldAbortBeforeLaunch(
     return true;
   }
 
-  if (sessionActivity.hasActiveRun(candidate.sessionKey)) {
+  const newerRuns = sessionActivity.getRunsStartedAfter({
+    sessionKey: candidate.sessionKey,
+    after: runStartBarrier,
+    ignoreRunIds: [candidate.runId],
+  });
+  if (newerRuns.length > 0) {
     logSkip(logger, "session became active again", {
       runId: candidate.runId,
+      candidateRunId: candidate.runId,
       sessionKey: candidate.sessionKey,
+      runStartBarrier,
+      newerRuns,
     });
     return true;
   }
@@ -544,6 +555,8 @@ export function registerKeepGoingPlugin(
     runtime.sessionActivity.markRunStarted({
       sessionKey: ctx.sessionKey,
       runId: ctx.runId,
+      trigger: ctx.trigger,
+      source: "before_model_resolve",
     });
     runtime.logger.step("before_model_resolve", {
       runId: ctx.runId,
@@ -595,6 +608,9 @@ export function registerKeepGoingPlugin(
       sessionKey: ctx.sessionKey,
       runId: ctx.runId,
     });
+    const runStartBarrier = runtime.sessionActivity.captureRunStartBarrier({
+      sessionKey: ctx.sessionKey,
+    });
     runtime.logger.step("agent_end received", {
       runId: ctx.runId,
       sessionId: ctx.sessionId,
@@ -603,6 +619,7 @@ export function registerKeepGoingPlugin(
       durationMs: event.durationMs,
       trigger: ctx.trigger,
       messageCount: event.messages.length,
+      runStartBarrier,
     });
 
     try {
@@ -614,7 +631,7 @@ export function registerKeepGoingPlugin(
         return;
       }
 
-      const eligible = resolveEligibleContinuationContext(runtime, event, ctx);
+      const eligible = resolveEligibleContinuationContext(runtime, event, ctx, runStartBarrier);
       if (!eligible) {
         return;
       }

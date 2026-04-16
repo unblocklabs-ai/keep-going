@@ -16,6 +16,32 @@ type GuardSnapshot = {
   sessionFile?: ActivitySnapshot;
 };
 
+type RunState = {
+  runId: string;
+  sessionKey: string;
+  startSequence: number;
+  startedAt: number;
+  endedAt?: number;
+  active: boolean;
+  trigger?: string;
+  source?: string;
+};
+
+type RunStartBarrier = {
+  lastStartSequence: number;
+};
+
+type RunQueryResult = {
+  runId: string;
+  sessionKey: string;
+  startSequence: number;
+  startedAt: number;
+  endedAt?: number;
+  active: boolean;
+  trigger?: string;
+  source?: string;
+};
+
 type TranscriptUpdate = {
   sessionFile: string;
   sessionKey?: string;
@@ -36,9 +62,18 @@ export class SessionActivityTracker {
   private readonly lastUserMessageBySessionKey = new Map<string, UserMessageSnapshot>();
   private readonly lastUserMessageBySessionFile = new Map<string, UserMessageSnapshot>();
   private readonly endedRunAtByRunId = new Map<string, number>();
+  private readonly runStateByRunId = new Map<string, RunState>();
+  private readonly latestRunStartSequenceBySessionKey = new Map<string, number>();
+  private nextRunStartSequence = 0;
 
-  markRunStarted(params: { sessionKey?: string; runId?: string }): void {
-    this.pruneStaleRunState(Date.now());
+  markRunStarted(params: {
+    sessionKey?: string;
+    runId?: string;
+    trigger?: string;
+    source?: string;
+  }): void {
+    const now = Date.now();
+    this.pruneStaleRunState(now);
     const sessionKey = normalizeSessionKey(params.sessionKey);
     const runId = normalizeString(params.runId);
     if (!sessionKey || !runId) {
@@ -53,13 +88,34 @@ export class SessionActivityTracker {
     active.add(runId);
     this.sessionKeyByRunId.set(runId, sessionKey);
     this.endedRunAtByRunId.delete(runId);
+
+    const existingState = this.runStateByRunId.get(runId);
+    const canReuseSequence = existingState?.sessionKey === sessionKey;
+    const startSequence = canReuseSequence
+      ? existingState.startSequence
+      : ++this.nextRunStartSequence;
+    this.runStateByRunId.set(runId, {
+      runId,
+      sessionKey,
+      startSequence,
+      startedAt: canReuseSequence ? existingState.startedAt : now,
+      active: true,
+      trigger: normalizeString(params.trigger) ?? existingState?.trigger,
+      source: normalizeString(params.source) ?? existingState?.source,
+    });
+    const lastStartSequence = this.latestRunStartSequenceBySessionKey.get(sessionKey) ?? 0;
+    if (startSequence > lastStartSequence) {
+      this.latestRunStartSequenceBySessionKey.set(sessionKey, startSequence);
+    }
+
     if (!this.transcriptMessagesByRunId.has(runId)) {
       this.transcriptMessagesByRunId.set(runId, []);
     }
   }
 
   markRunEnded(params: { sessionKey?: string; runId?: string }): void {
-    this.pruneStaleRunState(Date.now());
+    const now = Date.now();
+    this.pruneStaleRunState(now);
     const runId = normalizeString(params.runId);
     if (!runId) {
       return;
@@ -76,20 +132,67 @@ export class SessionActivityTracker {
       return;
     }
     active.delete(runId);
-    if (active.size === 0) {
-      this.activeRunIdsBySessionKey.delete(sessionKey);
+    this.deleteEmptyActiveRunSet(sessionKey, active);
+    this.endedRunAtByRunId.set(runId, now);
+    const runState = this.runStateByRunId.get(runId);
+    if (runState) {
+      this.runStateByRunId.set(runId, {
+        ...runState,
+        active: false,
+        endedAt: now,
+      });
     }
-    this.endedRunAtByRunId.set(runId, Date.now());
+    this.cleanupSessionMetadataIfUnused(sessionKey);
   }
 
-  hasActiveRun(sessionKey?: string): boolean {
+  captureRunStartBarrier(params: { sessionKey?: string }): RunStartBarrier {
     this.pruneStaleRunState(Date.now());
-    const key = normalizeSessionKey(sessionKey);
-    if (!key) {
-      return false;
+    const sessionKey = normalizeSessionKey(params.sessionKey);
+    return {
+      lastStartSequence: sessionKey
+        ? (this.latestRunStartSequenceBySessionKey.get(sessionKey) ?? 0)
+        : 0,
+    };
+  }
+
+  getRunsStartedAfter(params: {
+    sessionKey?: string;
+    after: RunStartBarrier;
+    ignoreRunIds?: string[];
+  }): RunQueryResult[] {
+    this.pruneStaleRunState(Date.now());
+    const sessionKey = normalizeSessionKey(params.sessionKey);
+    if (!sessionKey) {
+      return [];
     }
-    const active = this.activeRunIdsBySessionKey.get(key);
-    return Boolean(active && active.size > 0);
+
+    const ignoredRunIds = new Set(
+      (params.ignoreRunIds ?? [])
+        .map((runId) => normalizeString(runId))
+        .filter((runId): runId is string => Boolean(runId)),
+    );
+
+    return [...this.runStateByRunId.values()]
+      .filter((runState) => {
+        if (runState.sessionKey !== sessionKey) {
+          return false;
+        }
+        if (ignoredRunIds.has(runState.runId)) {
+          return false;
+        }
+        return runState.startSequence > params.after.lastStartSequence;
+      })
+      .sort((left, right) => left.startSequence - right.startSequence)
+      .map((runState) => ({
+        runId: runState.runId,
+        sessionKey: runState.sessionKey,
+        startSequence: runState.startSequence,
+        startedAt: runState.startedAt,
+        endedAt: runState.endedAt,
+        active: runState.active,
+        trigger: runState.trigger,
+        source: runState.source,
+      }));
   }
 
   recordTranscriptUpdate(update: TranscriptUpdate): void {
@@ -203,9 +306,19 @@ export class SessionActivityTracker {
     if (!key) {
       return;
     }
+    const sessionKey = this.sessionKeyByRunId.get(key) ?? this.runStateByRunId.get(key)?.sessionKey;
+    if (sessionKey) {
+      const active = this.activeRunIdsBySessionKey.get(sessionKey);
+      if (active) {
+        active.delete(key);
+        this.deleteEmptyActiveRunSet(sessionKey, active);
+      }
+    }
     this.sessionKeyByRunId.delete(key);
     this.transcriptMessagesByRunId.delete(key);
     this.endedRunAtByRunId.delete(key);
+    this.runStateByRunId.delete(key);
+    this.cleanupSessionMetadataIfUnused(sessionKey);
   }
 
   private changed(previous?: ActivitySnapshot, current?: ActivitySnapshot): boolean {
@@ -223,9 +336,13 @@ export class SessionActivityTracker {
       if (now - endedAt <= STALE_RUN_STATE_MAX_AGE_MS) {
         continue;
       }
+      const sessionKey =
+        this.sessionKeyByRunId.get(runId) ?? this.runStateByRunId.get(runId)?.sessionKey;
       this.sessionKeyByRunId.delete(runId);
       this.transcriptMessagesByRunId.delete(runId);
       this.endedRunAtByRunId.delete(runId);
+      this.runStateByRunId.delete(runId);
+      this.cleanupSessionMetadataIfUnused(sessionKey);
     }
   }
 
@@ -240,6 +357,27 @@ export class SessionActivityTracker {
         ? existing.slice(-MAX_SESSION_TRANSCRIPT_MESSAGES)
         : existing;
     this.transcriptMessagesBySessionKey.set(sessionKey, trimmed);
+  }
+
+  private deleteEmptyActiveRunSet(sessionKey: string, active: Set<string>): void {
+    if (active.size === 0) {
+      this.activeRunIdsBySessionKey.delete(sessionKey);
+    }
+  }
+
+  private cleanupSessionMetadataIfUnused(sessionKey?: string): void {
+    if (!sessionKey) {
+      return;
+    }
+    if (this.activeRunIdsBySessionKey.has(sessionKey)) {
+      return;
+    }
+    for (const runState of this.runStateByRunId.values()) {
+      if (runState.sessionKey === sessionKey) {
+        return;
+      }
+    }
+    this.latestRunStartSequenceBySessionKey.delete(sessionKey);
   }
 }
 

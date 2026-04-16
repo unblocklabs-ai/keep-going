@@ -385,6 +385,113 @@ test("plugin-triggered continuation flow dispatches assistant replies to the sto
   });
 });
 
+test("validator-approved continuation is not blocked when the same run is re-observed during cleanup", async () => {
+  const { api, hooks, logs } = createMockApi({ enabled: true, debug_logs: true });
+  const launchCalls: LaunchContinuationParams[] = [];
+
+  registerKeepGoingPlugin(api, {
+    validateContinuationWithLlm: async () => {
+      const beforeModelResolve = hooks.get("before_model_resolve");
+      await beforeModelResolve?.({ prompt: "cleanup replay" }, createRunContext());
+      return {
+        continue: true,
+        reason: "unfinished work remains",
+        validatorModel: "gpt-5.4-mini",
+      };
+    },
+    launchContinuation: async (_api, params) => {
+      launchCalls.push(params);
+      return { followUpRunId: "follow-up-1" };
+    },
+  });
+
+  const beforeModelResolve = hooks.get("before_model_resolve");
+  const agentEnd = hooks.get("agent_end");
+  const runContext = createRunContext();
+
+  await beforeModelResolve?.({ prompt: "Please continue the task." }, runContext);
+  await agentEnd?.(
+    {
+      success: true,
+      messages: [],
+    },
+    runContext,
+  );
+
+  assert.equal(launchCalls.length, 1);
+  assert.equal(
+    logs.info.some(
+      (entry) => entry.message === "Keep-Going Plugin: skip: session became active again",
+    ),
+    false,
+  );
+});
+
+test("validator-approved continuation is aborted when a distinct newer run starts during validation", async () => {
+  const { api, hooks, logs, emitAgentEvent } = createMockApi({
+    enabled: true,
+    debug_logs: true,
+  });
+  const launchCalls: LaunchContinuationParams[] = [];
+
+  registerKeepGoingPlugin(api, {
+    validateContinuationWithLlm: async () => {
+      const beforeModelResolve = hooks.get("before_model_resolve");
+      const newerRunContext = {
+        ...createRunContext(),
+        runId: "run-2",
+        sessionId: "session-2",
+      };
+      await beforeModelResolve?.({ prompt: "A newer run started." }, newerRunContext);
+      emitAgentEvent({
+        stream: "lifecycle",
+        data: { phase: "error" },
+        sessionKey: SESSION_KEY,
+        runId: "run-2",
+      });
+      return {
+        continue: true,
+        reason: "unfinished work remains",
+        validatorModel: "gpt-5.4-mini",
+      };
+    },
+    launchContinuation: async (_api, params) => {
+      launchCalls.push(params);
+      return { followUpRunId: "follow-up-1" };
+    },
+  });
+
+  const beforeModelResolve = hooks.get("before_model_resolve");
+  const agentEnd = hooks.get("agent_end");
+  const runContext = createRunContext();
+
+  await beforeModelResolve?.({ prompt: "Please continue the task." }, runContext);
+  await agentEnd?.(
+    {
+      success: true,
+      messages: [],
+    },
+    runContext,
+  );
+
+  assert.equal(launchCalls.length, 0);
+  const skipLog = logs.info.find(
+    (entry) => entry.message === "Keep-Going Plugin: skip: session became active again",
+  );
+  assert.ok(skipLog);
+  assert.equal(skipLog.meta?.candidateRunId, "run-1");
+  assert.ok(Array.isArray(skipLog.meta?.newerRuns));
+  assert.equal(skipLog.meta?.newerRuns.length, 1);
+  assert.equal(skipLog.meta?.newerRuns[0]?.runId, "run-2");
+  assert.equal(skipLog.meta?.newerRuns[0]?.sessionKey, "agent:main:slack:channel:c123");
+  assert.equal(skipLog.meta?.newerRuns[0]?.startSequence, 2);
+  assert.equal(skipLog.meta?.newerRuns[0]?.active, false);
+  assert.equal(skipLog.meta?.newerRuns[0]?.trigger, "user");
+  assert.equal(skipLog.meta?.newerRuns[0]?.source, "before_model_resolve");
+  assert.ok(typeof skipLog.meta?.newerRuns[0]?.startedAt === "number");
+  assert.ok(typeof skipLog.meta?.newerRuns[0]?.endedAt === "number");
+});
+
 test("debug_logs emits prefixed step logs when enabled", async () => {
   const { api, hooks, logs } = createMockApi({ enabled: true, debug_logs: true });
 

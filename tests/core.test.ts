@@ -16,6 +16,7 @@ import {
   normalizeTranscriptMessages,
 } from "../src/messages.js";
 import { createDefaultOpenAiValidatorConfig } from "../src/openai-validator-config.js";
+import { SessionActivityTracker } from "../src/session-activity.js";
 import { resolveSessionRoute, type SessionRouteApi } from "../src/session-route.js";
 import type { TranscriptMessage } from "../src/transcript-types.js";
 import type { ContinuationCandidate, KeepGoingLlmValidatorConfig } from "../src/types.js";
@@ -220,6 +221,49 @@ test("normalizeHumanFacingUserText strips Slack wrapper metadata", () => {
   ].join("\n"));
 
   assert.equal(cleaned, "Analyze the logs");
+});
+
+test("clearRun removes stale active replay state for the same run id", () => {
+  const tracker = new SessionActivityTracker();
+
+  tracker.markRunStarted({
+    sessionKey: SLACK_SESSION_KEY,
+    runId: "run-1",
+    trigger: "message",
+    source: "before_model_resolve",
+  });
+  tracker.markRunEnded({
+    sessionKey: SLACK_SESSION_KEY,
+    runId: "run-1",
+  });
+
+  tracker.markRunStarted({
+    sessionKey: SLACK_SESSION_KEY,
+    runId: "run-1",
+    trigger: "message",
+    source: "before_model_resolve",
+  });
+  tracker.clearRun("run-1");
+
+  tracker.recordTranscriptUpdate({
+    sessionFile: SLACK_SESSION_FILE,
+    sessionKey: SLACK_SESSION_KEY,
+    messageId: "assistant-msg-1",
+    message: {
+      role: "assistant",
+      content: [{ type: "output_text", text: "cleanup finished" }],
+    },
+  });
+
+  assert.deepEqual(tracker.getRunTranscriptMessages("run-1"), []);
+  assert.deepEqual(
+    tracker.getRunsStartedAfter({
+      sessionKey: SLACK_SESSION_KEY,
+      after: { lastStartSequence: 0 },
+      ignoreRunIds: [],
+    }),
+    [],
+  );
 });
 
 test("extract human-facing final turn messages skip control text and synthetic continuation prompts", () => {
