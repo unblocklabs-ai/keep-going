@@ -10,6 +10,7 @@ const INSPECTOR_BIN = path.join(ROOT, "node_modules", ".bin", "plugin-inspector"
 const allowNoOpenClaw = process.env.CHECK_INSPECTOR_ALLOW_NO_OPENCLAW === "1";
 const CANDIDATE_OPENCLAW_CHECKOUTS = [
   process.env.OPENCLAW_CHECKOUT,
+  path.join(HOME, "Desktop", "openclaw"),
   path.join(HOME, "tmp-openclaw-audit", "openclaw"),
   path.join(HOME, "tmp-openclaw", "openclaw")
 ].filter(Boolean);
