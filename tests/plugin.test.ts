@@ -389,13 +389,211 @@ test("plugin-triggered continuation flow dispatches assistant replies to the sto
     /Only use a normal assistant reply when you intend to end your turn\./,
   );
   assert.equal(embeddedTranscriptPrompt, "");
-  assert.equal(deliveredPayloads.length, 1);
+  assert.equal(deliveredPayloads.length, 2);
   assert.equal(deliveredPayloads[0]?.to, "channel:C123");
   assert.equal(deliveredPayloads[0]?.threadId, "1712345678.000100");
   assert.equal(deliveredPayloads[0]?.replyToId, undefined);
   assert.deepEqual(deliveredPayloads[0]?.payload, {
+    text: "🦞 Keep going!",
+  });
+  assert.equal(deliveredPayloads[1]?.to, "channel:C123");
+  assert.equal(deliveredPayloads[1]?.threadId, "1712345678.000100");
+  assert.equal(deliveredPayloads[1]?.replyToId, undefined);
+  assert.deepEqual(deliveredPayloads[1]?.payload, {
     text: "It woke cleanly on 0.1.8...",
   });
+});
+
+test("user-facing notice sends custom text only when validator approves continuation", async () => {
+  const deliveredPayloads: Array<Record<string, unknown>> = [];
+  const { api, hooks } = createMockApi(
+    {
+      enabled: true,
+      userFacingNotice: {
+        enabled: true,
+        text: "Taking another pass.",
+      },
+    },
+    {
+      loadOutboundAdapter: async () => ({
+        sendPayload: async (ctx: Record<string, unknown>) => {
+          deliveredPayloads.push(ctx);
+          return { ok: true };
+        },
+      }),
+    },
+  );
+  const launchCalls: LaunchContinuationParams[] = [];
+
+  registerKeepGoingPlugin(api, {
+    validateContinuationWithLlm: async () => ({
+      continue: true,
+      reason: "unfinished work remains",
+      validatorModel: "gpt-5.4-mini",
+    }),
+    launchContinuation: async (_api, params) => {
+      launchCalls.push(params);
+      return { followUpRunId: "follow-up-1" };
+    },
+  });
+
+  const beforeModelResolve = hooks.get("before_model_resolve");
+  const agentEnd = hooks.get("agent_end");
+  const runContext = createRunContext();
+
+  await beforeModelResolve?.({ prompt: "Please continue the task." }, runContext);
+  await agentEnd?.(
+    {
+      success: true,
+      messages: [],
+    },
+    runContext,
+  );
+
+  assert.equal(launchCalls.length, 1);
+  assert.equal(deliveredPayloads.length, 1);
+  assert.deepEqual(deliveredPayloads[0]?.payload, {
+    text: "Taking another pass.",
+  });
+  assert.equal(deliveredPayloads[0]?.threadId, "1712345678.000100");
+});
+
+test("user-facing notice does not send when disabled", async () => {
+  const deliveredPayloads: Array<Record<string, unknown>> = [];
+  const { api, hooks } = createMockApi(
+    {
+      enabled: true,
+      userFacingNotice: {
+        enabled: false,
+        text: "Taking another pass.",
+      },
+    },
+    {
+      loadOutboundAdapter: async () => ({
+        sendPayload: async (ctx: Record<string, unknown>) => {
+          deliveredPayloads.push(ctx);
+          return { ok: true };
+        },
+      }),
+    },
+  );
+  const launchCalls: LaunchContinuationParams[] = [];
+
+  registerKeepGoingPlugin(api, {
+    validateContinuationWithLlm: async () => ({
+      continue: true,
+      reason: "unfinished work remains",
+      validatorModel: "gpt-5.4-mini",
+    }),
+    launchContinuation: async (_api, params) => {
+      launchCalls.push(params);
+      return { followUpRunId: "follow-up-1" };
+    },
+  });
+
+  const beforeModelResolve = hooks.get("before_model_resolve");
+  const agentEnd = hooks.get("agent_end");
+  const runContext = createRunContext();
+
+  await beforeModelResolve?.({ prompt: "Please continue the task." }, runContext);
+  await agentEnd?.(
+    {
+      success: true,
+      messages: [],
+    },
+    runContext,
+  );
+
+  assert.equal(launchCalls.length, 1);
+  assert.equal(deliveredPayloads.length, 0);
+});
+
+test("user-facing notice is not sent when validator declines continuation", async () => {
+  const deliveredPayloads: Array<Record<string, unknown>> = [];
+  const { api, hooks } = createMockApi(
+    { enabled: true },
+    {
+      loadOutboundAdapter: async () => ({
+        sendPayload: async (ctx: Record<string, unknown>) => {
+          deliveredPayloads.push(ctx);
+          return { ok: true };
+        },
+      }),
+    },
+  );
+  const launchCalls: LaunchContinuationParams[] = [];
+
+  registerKeepGoingPlugin(api, {
+    validateContinuationWithLlm: async () => ({
+      continue: false,
+      reason: "already complete",
+      validatorModel: "gpt-5.4-mini",
+    }),
+    launchContinuation: async (_api, params) => {
+      launchCalls.push(params);
+      return { followUpRunId: "follow-up-1" };
+    },
+  });
+
+  const beforeModelResolve = hooks.get("before_model_resolve");
+  const agentEnd = hooks.get("agent_end");
+  const runContext = createRunContext();
+
+  await beforeModelResolve?.({ prompt: "Please continue the task." }, runContext);
+  await agentEnd?.(
+    {
+      success: true,
+      messages: [],
+    },
+    runContext,
+  );
+
+  assert.equal(launchCalls.length, 0);
+  assert.equal(deliveredPayloads.length, 0);
+});
+
+test("user-facing notice failure does not block continuation launch", async () => {
+  const { api, hooks, logs } = createMockApi(
+    { enabled: true, debug_logs: false },
+    {
+      loadOutboundAdapter: async () => ({
+        sendPayload: async () => {
+          throw new Error("slack unavailable");
+        },
+      }),
+    },
+  );
+  const launchCalls: LaunchContinuationParams[] = [];
+
+  registerKeepGoingPlugin(api, {
+    validateContinuationWithLlm: async () => ({
+      continue: true,
+      reason: "unfinished work remains",
+      validatorModel: "gpt-5.4-mini",
+    }),
+    launchContinuation: async (_api, params) => {
+      launchCalls.push(params);
+      return { followUpRunId: "follow-up-1" };
+    },
+  });
+
+  const beforeModelResolve = hooks.get("before_model_resolve");
+  const agentEnd = hooks.get("agent_end");
+  const runContext = createRunContext();
+
+  await beforeModelResolve?.({ prompt: "Please continue the task." }, runContext);
+  await agentEnd?.(
+    {
+      success: true,
+      messages: [],
+    },
+    runContext,
+  );
+
+  assert.equal(launchCalls.length, 1);
+  assert.equal(logs.error.length, 1);
+  assert.equal(logs.error[0]?.message, "Keep-Going Plugin: user-facing continuation notice failed");
+  assert.equal(logs.error[0]?.meta?.error, "slack unavailable");
 });
 
 test("validator-approved continuation is not blocked when the same run is re-observed during cleanup", async () => {

@@ -1,4 +1,5 @@
 import { type OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
+import { sendTextMediaPayload } from "openclaw/plugin-sdk/reply-payload";
 import { ActiveSubagentTracker } from "./active-subagents.js";
 import { resolveKeepGoingConfig } from "./config.js";
 import { KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX } from "./constants.js";
@@ -87,10 +88,14 @@ function normalizeTimeoutMs(
 function buildCandidate(
   event: AgentEndEvent,
   ctx: AgentContext,
+  config: KeepGoingPluginConfig,
 ): ContinuationCandidate | undefined {
   if (!ctx.runId || !ctx.sessionId || !ctx.sessionKey || !ctx.workspaceDir) {
     return undefined;
   }
+  const ignoredTranscriptTexts = config.userFacingNotice.enabled
+    ? [config.userFacingNotice.text]
+    : [];
   return {
     runId: ctx.runId,
     agentId: ctx.agentId,
@@ -106,6 +111,7 @@ function buildCandidate(
     error: event.error,
     durationMs: event.durationMs,
     messages: event.messages,
+    ignoredTranscriptTexts,
   };
 }
 
@@ -228,7 +234,7 @@ function resolveEligibleContinuationContext(
 ): EligibleContinuationContext | undefined {
   const { api, config, logger, dedupe, activeSubagents, sessionActivity } = runtime;
 
-  const candidate = buildCandidate(event, ctx);
+  const candidate = buildCandidate(event, ctx, config);
   if (!candidate) {
     logSkip(logger, "missing candidate context");
     return undefined;
@@ -434,6 +440,71 @@ function shouldAbortBeforeLaunch(
   return false;
 }
 
+async function sendUserFacingNotice(
+  runtime: KeepGoingRuntime,
+  context: EligibleContinuationContext,
+): Promise<void> {
+  const { api, config, logger } = runtime;
+  const { candidate, route, wakeContext } = context;
+  const text = config.userFacingNotice.text.trim();
+  if (!config.userFacingNotice.enabled || !text) {
+    return;
+  }
+  if (!route.channel || !route.to) {
+    logger.error("user-facing continuation notice skipped: missing channel route", {
+      runId: candidate.runId,
+      sessionKey: candidate.sessionKey,
+      threadId: route.threadId,
+    });
+    return;
+  }
+
+  try {
+    const adapter = await api.runtime.channel.outbound.loadAdapter(route.channel);
+    if (!adapter) {
+      throw new Error(`missing outbound adapter for channel ${route.channel}`);
+    }
+
+    const payload = { text };
+    const deliveryContext = {
+      cfg: api.config,
+      to: route.to,
+      text,
+      payload,
+      threadId: route.threadId,
+      replyToId: route.channel === "slack"
+        ? undefined
+        : wakeContext.currentMessageId,
+      accountId: route.accountId,
+    };
+
+    if (adapter.sendPayload) {
+      await adapter.sendPayload(deliveryContext);
+    } else if (adapter.sendText || adapter.sendMedia) {
+      await sendTextMediaPayload({
+        channel: route.channel,
+        ctx: deliveryContext,
+        adapter,
+      });
+    } else {
+      throw new Error(`channel ${route.channel} cannot deliver notice payloads`);
+    }
+
+    logger.step("sent user-facing continuation notice", {
+      runId: candidate.runId,
+      sessionKey: candidate.sessionKey,
+      threadId: route.threadId,
+    });
+  } catch (error) {
+    logger.error("user-facing continuation notice failed", {
+      runId: candidate.runId,
+      sessionKey: candidate.sessionKey,
+      threadId: route.threadId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 async function launchEligibleContinuation(
   runtime: KeepGoingRuntime,
   context: EligibleContinuationContext,
@@ -469,6 +540,7 @@ async function launchEligibleContinuation(
       reason: decision.reason,
       ...(validatorModel ? { validatorModel } : {}),
     });
+    await sendUserFacingNotice(runtime, context);
     const launchResult = await deps.launchContinuation(api, {
       candidate,
       decision,
@@ -511,7 +583,11 @@ export function registerKeepGoingPlugin(
     ),
     dedupe: new OneShotDedupe(),
     activeSubagents: new ActiveSubagentTracker(),
-    sessionActivity: new SessionActivityTracker(),
+    sessionActivity: new SessionActivityTracker({
+      ignoredTexts: config.userFacingNotice.enabled
+        ? [config.userFacingNotice.text]
+        : [],
+    }),
     deps,
   };
 

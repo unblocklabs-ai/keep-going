@@ -25,6 +25,10 @@ export type KeepGoingPluginConfig = {
   debug_logs: boolean;
   channels: string[];
   timeoutMs?: number;
+  userFacingNotice: {
+    enabled: boolean;
+    text: string;
+  };
   validator: {
     llm: KeepGoingLlmValidatorConfig;
   };
@@ -45,6 +49,7 @@ export type ContinuationCandidate = {
   error?: string;
   durationMs?: number;
   messages: unknown[];
+  ignoredTranscriptTexts?: string[];
 };
 
 export type ContinuationDecision = {

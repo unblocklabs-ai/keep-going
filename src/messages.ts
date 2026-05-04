@@ -18,6 +18,10 @@ const INTERNAL_USER_TEXT_MARKERS = [
   "[Internal task completion event]",
 ];
 
+export type TranscriptNormalizationOptions = {
+  ignoredTexts?: string[];
+};
+
 function isNoReplyAssistantText(value: string): boolean {
   return value.trim().toUpperCase() === NO_REPLY_TEXT;
 }
@@ -32,6 +36,14 @@ function isSyntheticUserText(value: string): boolean {
 
 function isInternalUserText(value: string): boolean {
   return INTERNAL_USER_TEXT_MARKERS.some((marker) => value.includes(marker));
+}
+
+function isIgnoredText(value: string, options?: TranscriptNormalizationOptions): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return false;
+  }
+  return (options?.ignoredTexts ?? []).some((entry) => entry.trim() === trimmed);
 }
 
 function isSlackWrappedUserText(value: string): boolean {
@@ -183,7 +195,10 @@ function normalizeTranscriptRole(value: unknown): TranscriptMessageRole | undefi
   return undefined;
 }
 
-function normalizeTranscriptMessage(message: unknown): TranscriptMessage | undefined {
+function normalizeTranscriptMessage(
+  message: unknown,
+  options?: TranscriptNormalizationOptions,
+): TranscriptMessage | undefined {
   if (!message || typeof message !== "object") {
     return undefined;
   }
@@ -204,6 +219,10 @@ function normalizeTranscriptMessage(message: unknown): TranscriptMessage | undef
     return undefined;
   }
 
+  if (isIgnoredText(text, options)) {
+    return undefined;
+  }
+
   if (role === "user" && isSyntheticUserText(text)) {
     return undefined;
   }
@@ -211,9 +230,12 @@ function normalizeTranscriptMessage(message: unknown): TranscriptMessage | undef
   return { role, text };
 }
 
-export function normalizeTranscriptMessages(messages: unknown[]): TranscriptMessage[] {
+export function normalizeTranscriptMessages(
+  messages: unknown[],
+  options?: TranscriptNormalizationOptions,
+): TranscriptMessage[] {
   return messages.flatMap((message) => {
-    const normalized = normalizeTranscriptMessage(message);
+    const normalized = normalizeTranscriptMessage(message, options);
     return normalized ? [normalized] : [];
   });
 }

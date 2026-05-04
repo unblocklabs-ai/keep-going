@@ -22,6 +22,13 @@ function isSyntheticUserText(value) {
 function isInternalUserText(value) {
     return INTERNAL_USER_TEXT_MARKERS.some((marker) => value.includes(marker));
 }
+function isIgnoredText(value, options) {
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return false;
+    }
+    return (options?.ignoredTexts ?? []).some((entry) => entry.trim() === trimmed);
+}
 function isSlackWrappedUserText(value) {
     const trimmed = value.trim();
     if (!trimmed) {
@@ -146,7 +153,7 @@ function normalizeTranscriptRole(value) {
     }
     return undefined;
 }
-function normalizeTranscriptMessage(message) {
+function normalizeTranscriptMessage(message, options) {
     if (!message || typeof message !== "object") {
         return undefined;
     }
@@ -164,14 +171,17 @@ function normalizeTranscriptMessage(message) {
     if (!text) {
         return undefined;
     }
+    if (isIgnoredText(text, options)) {
+        return undefined;
+    }
     if (role === "user" && isSyntheticUserText(text)) {
         return undefined;
     }
     return { role, text };
 }
-export function normalizeTranscriptMessages(messages) {
+export function normalizeTranscriptMessages(messages, options) {
     return messages.flatMap((message) => {
-        const normalized = normalizeTranscriptMessage(message);
+        const normalized = normalizeTranscriptMessage(message, options);
         return normalized ? [normalized] : [];
     });
 }

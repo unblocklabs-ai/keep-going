@@ -1,3 +1,4 @@
+import { sendTextMediaPayload } from "openclaw/plugin-sdk/reply-payload";
 import { ActiveSubagentTracker } from "./active-subagents.js";
 import { resolveKeepGoingConfig } from "./config.js";
 import { KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX } from "./constants.js";
@@ -18,10 +19,13 @@ function normalizeTimeoutMs(api, configuredTimeoutMs) {
         overrideMs: configuredTimeoutMs,
     });
 }
-function buildCandidate(event, ctx) {
+function buildCandidate(event, ctx, config) {
     if (!ctx.runId || !ctx.sessionId || !ctx.sessionKey || !ctx.workspaceDir) {
         return undefined;
     }
+    const ignoredTranscriptTexts = config.userFacingNotice.enabled
+        ? [config.userFacingNotice.text]
+        : [];
     return {
         runId: ctx.runId,
         agentId: ctx.agentId,
@@ -37,6 +41,7 @@ function buildCandidate(event, ctx) {
         error: event.error,
         durationMs: event.durationMs,
         messages: event.messages,
+        ignoredTranscriptTexts,
     };
 }
 function logSkip(logger, reason, metadata) {
@@ -128,7 +133,7 @@ function getRouteSkip(candidate, config, route) {
 }
 function resolveEligibleContinuationContext(runtime, event, ctx, runStartBarrier) {
     const { api, config, logger, dedupe, activeSubagents, sessionActivity } = runtime;
-    const candidate = buildCandidate(event, ctx);
+    const candidate = buildCandidate(event, ctx, config);
     if (!candidate) {
         logSkip(logger, "missing candidate context");
         return undefined;
@@ -306,6 +311,66 @@ function shouldAbortBeforeLaunch(runtime, context, evaluated) {
     }
     return false;
 }
+async function sendUserFacingNotice(runtime, context) {
+    const { api, config, logger } = runtime;
+    const { candidate, route, wakeContext } = context;
+    const text = config.userFacingNotice.text.trim();
+    if (!config.userFacingNotice.enabled || !text) {
+        return;
+    }
+    if (!route.channel || !route.to) {
+        logger.error("user-facing continuation notice skipped: missing channel route", {
+            runId: candidate.runId,
+            sessionKey: candidate.sessionKey,
+            threadId: route.threadId,
+        });
+        return;
+    }
+    try {
+        const adapter = await api.runtime.channel.outbound.loadAdapter(route.channel);
+        if (!adapter) {
+            throw new Error(`missing outbound adapter for channel ${route.channel}`);
+        }
+        const payload = { text };
+        const deliveryContext = {
+            cfg: api.config,
+            to: route.to,
+            text,
+            payload,
+            threadId: route.threadId,
+            replyToId: route.channel === "slack"
+                ? undefined
+                : wakeContext.currentMessageId,
+            accountId: route.accountId,
+        };
+        if (adapter.sendPayload) {
+            await adapter.sendPayload(deliveryContext);
+        }
+        else if (adapter.sendText || adapter.sendMedia) {
+            await sendTextMediaPayload({
+                channel: route.channel,
+                ctx: deliveryContext,
+                adapter,
+            });
+        }
+        else {
+            throw new Error(`channel ${route.channel} cannot deliver notice payloads`);
+        }
+        logger.step("sent user-facing continuation notice", {
+            runId: candidate.runId,
+            sessionKey: candidate.sessionKey,
+            threadId: route.threadId,
+        });
+    }
+    catch (error) {
+        logger.error("user-facing continuation notice failed", {
+            runId: candidate.runId,
+            sessionKey: candidate.sessionKey,
+            threadId: route.threadId,
+            error: error instanceof Error ? error.message : String(error),
+        });
+    }
+}
 async function launchEligibleContinuation(runtime, context, evaluated) {
     const { config, logger, dedupe, api, deps } = runtime;
     const { candidate, dedupeKey, route, wakeContext, sessionFile } = context;
@@ -335,6 +400,7 @@ async function launchEligibleContinuation(runtime, context, evaluated) {
             reason: decision.reason,
             ...(validatorModel ? { validatorModel } : {}),
         });
+        await sendUserFacingNotice(runtime, context);
         const launchResult = await deps.launchContinuation(api, {
             candidate,
             decision,
@@ -371,7 +437,11 @@ export function registerKeepGoingPlugin(api, deps = DEFAULT_DEPS) {
         logger: createKeepGoingLogger(api.runtime.logging.getChildLogger({ plugin: api.id }), config.debug_logs),
         dedupe: new OneShotDedupe(),
         activeSubagents: new ActiveSubagentTracker(),
-        sessionActivity: new SessionActivityTracker(),
+        sessionActivity: new SessionActivityTracker({
+            ignoredTexts: config.userFacingNotice.enabled
+                ? [config.userFacingNotice.text]
+                : [],
+        }),
         deps,
     };
     runtime.logger.step("registered", {

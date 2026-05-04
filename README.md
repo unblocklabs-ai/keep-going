@@ -64,6 +64,10 @@ The plugin exposes a small config surface through `openclaw.plugin.json`:
   "debug_logs": false,
   "channels": ["slack"],
   "timeoutMs": 120000,
+  "userFacingNotice": {
+    "enabled": true,
+    "text": "🦞 Keep going!"
+  },
   "validator": {
     "llm": {
       "model": "gpt-5.4-mini",
@@ -84,6 +88,8 @@ Notes:
 
 - `enabled` defaults to `true`
 - `channels` defaults to `["slack"]`; other channels are ignored
+- `userFacingNotice.enabled` defaults to `true`; when enabled, the plugin posts `userFacingNotice.text` in the Slack thread only after the validator approves a continuation
+- `userFacingNotice.text` defaults to `🦞 Keep going!`; the plugin ignores this configured text in its own transcript analysis while the notice is enabled
 - `validator.llm.model` defaults to `gpt-5.4-mini`
 - `validator.llm.apiKeyEnv` is the normal way to provide credentials
 - `validator.llm.apiKey` is supported but usually not desirable

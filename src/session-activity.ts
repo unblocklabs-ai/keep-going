@@ -1,4 +1,4 @@
-import { normalizeTranscriptMessages } from "./messages.js";
+import { normalizeTranscriptMessages, type TranscriptNormalizationOptions } from "./messages.js";
 import { normalizeString } from "./normalize.js";
 import { normalizeOptionalTrackingSessionKey } from "./session-key.js";
 import type { TranscriptMessage } from "./transcript-types.js";
@@ -65,6 +65,11 @@ export class SessionActivityTracker {
   private readonly runStateByRunId = new Map<string, RunState>();
   private readonly latestRunStartSequenceBySessionKey = new Map<string, number>();
   private nextRunStartSequence = 0;
+  private readonly transcriptNormalizationOptions: TranscriptNormalizationOptions;
+
+  constructor(options: TranscriptNormalizationOptions = {}) {
+    this.transcriptNormalizationOptions = options;
+  }
 
   markRunStarted(params: {
     sessionKey?: string;
@@ -199,7 +204,10 @@ export class SessionActivityTracker {
     this.pruneStaleRunState(Date.now());
     const sessionKey = normalizeSessionKey(update.sessionKey);
     if (sessionKey && update.message !== undefined) {
-      const normalizedMessages = normalizeTranscriptMessages([update.message]);
+      const normalizedMessages = normalizeTranscriptMessages(
+        [update.message],
+        this.transcriptNormalizationOptions,
+      );
       if (normalizedMessages.length > 0) {
         this.appendSessionTranscriptMessages(sessionKey, normalizedMessages);
       }

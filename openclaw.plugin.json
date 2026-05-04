@@ -1,7 +1,7 @@
 {
   "id": "keep-going",
   "name": "Keep Going",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Starts one same-session Slack follow-up run when a validator decides the assistant stopped before finishing actionable work.",
   "activation": {
     "onStartup": true,
@@ -26,6 +26,15 @@
       "label": "Continuation Timeout",
       "help": "Maximum runtime for the follow-up agent turn, in milliseconds.",
       "advanced": true
+    },
+    "userFacingNotice.enabled": {
+      "label": "User-Facing Notice",
+      "help": "Post a short Slack thread notice when Keep Going decides to wake the agent."
+    },
+    "userFacingNotice.text": {
+      "label": "Notice Text",
+      "placeholder": "🦞 Keep going!",
+      "help": "Slack thread message sent before the continuation run starts."
     },
     "validator.llm.model": {
       "label": "Validator Model",
@@ -101,6 +110,23 @@
         "type": "integer",
         "minimum": 1,
         "description": "Maximum runtime for the follow-up agent turn, in milliseconds."
+      },
+      "userFacingNotice": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Optional Slack thread notice sent when Keep Going wakes the agent.",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Post a short Slack thread notice when Keep Going decides to wake the agent."
+          },
+          "text": {
+            "type": "string",
+            "default": "🦞 Keep going!",
+            "description": "Slack thread message sent before the continuation run starts."
+          }
+        }
       },
       "validator": {
         "type": "object",

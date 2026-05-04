@@ -16,6 +16,10 @@ export class SessionActivityTracker {
     runStateByRunId = new Map();
     latestRunStartSequenceBySessionKey = new Map();
     nextRunStartSequence = 0;
+    transcriptNormalizationOptions;
+    constructor(options = {}) {
+        this.transcriptNormalizationOptions = options;
+    }
     markRunStarted(params) {
         const now = Date.now();
         this.pruneStaleRunState(now);
@@ -126,7 +130,7 @@ export class SessionActivityTracker {
         this.pruneStaleRunState(Date.now());
         const sessionKey = normalizeSessionKey(update.sessionKey);
         if (sessionKey && update.message !== undefined) {
-            const normalizedMessages = normalizeTranscriptMessages([update.message]);
+            const normalizedMessages = normalizeTranscriptMessages([update.message], this.transcriptNormalizationOptions);
             if (normalizedMessages.length > 0) {
                 this.appendSessionTranscriptMessages(sessionKey, normalizedMessages);
             }

@@ -1,8 +1,13 @@
 import { createDefaultOpenAiValidatorConfig, } from "./openai-validator-config.js";
+export const DEFAULT_USER_FACING_NOTICE_TEXT = "🦞 Keep going!";
 const DEFAULT_CONFIG = {
     enabled: true,
     debug_logs: false,
     channels: ["slack"],
+    userFacingNotice: {
+        enabled: true,
+        text: DEFAULT_USER_FACING_NOTICE_TEXT,
+    },
     validator: {
         llm: createDefaultOpenAiValidatorConfig(),
     },
@@ -37,12 +42,22 @@ export function resolveKeepGoingConfig(raw) {
     const validatorLlm = validator.llm && typeof validator.llm === "object"
         ? validator.llm
         : {};
+    const userFacingNotice = config.userFacingNotice && typeof config.userFacingNotice === "object"
+        ? config.userFacingNotice
+        : {};
     const channels = normalizeStringArray(config.channels);
+    const noticeText = typeof userFacingNotice.text === "string" && userFacingNotice.text.trim()
+        ? userFacingNotice.text.trim()
+        : DEFAULT_CONFIG.userFacingNotice.text;
     return {
         enabled: config.enabled !== false,
         debug_logs: normalizeBoolean(config.debug_logs, DEFAULT_CONFIG.debug_logs),
         channels: channels.length > 0 ? channels : DEFAULT_CONFIG.channels,
         timeoutMs: normalizePositiveInteger(config.timeoutMs),
+        userFacingNotice: {
+            enabled: normalizeBoolean(userFacingNotice.enabled, DEFAULT_CONFIG.userFacingNotice.enabled),
+            text: noticeText,
+        },
         validator: {
             llm: createDefaultOpenAiValidatorConfig({
                 model: typeof validatorLlm.model === "string" && validatorLlm.model.trim()
