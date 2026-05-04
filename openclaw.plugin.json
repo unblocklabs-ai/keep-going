@@ -2,26 +2,105 @@
   "id": "keep-going",
   "name": "Keep Going",
   "version": "0.2.1",
-  "description": "Post-turn continuation plugin for Slack-based OpenClaw sessions",
+  "description": "Starts one same-session Slack follow-up run when a validator decides the assistant stopped before finishing actionable work.",
+  "activation": {
+    "onStartup": true,
+    "onChannels": ["slack"],
+    "onCapabilities": ["hook"]
+  },
+  "uiHints": {
+    "enabled": {
+      "label": "Enabled",
+      "help": "Enable post-turn continuation checks."
+    },
+    "debug_logs": {
+      "label": "Debug Logs",
+      "help": "Emit detailed Keep Going runtime logs."
+    },
+    "channels": {
+      "label": "Channels",
+      "help": "Eligible channel ids. This plugin currently supports Slack only.",
+      "advanced": true
+    },
+    "timeoutMs": {
+      "label": "Continuation Timeout",
+      "help": "Maximum runtime for the follow-up agent turn, in milliseconds.",
+      "advanced": true
+    },
+    "validator.llm.model": {
+      "label": "Validator Model",
+      "placeholder": "gpt-5.4-mini",
+      "help": "OpenAI model used to decide whether a follow-up run is needed."
+    },
+    "validator.llm.systemPrompt": {
+      "label": "Validator System Prompt",
+      "help": "Optional override for the built-in continuation validator prompt.",
+      "advanced": true
+    },
+    "validator.llm.apiKey": {
+      "label": "OpenAI API Key",
+      "sensitive": true,
+      "placeholder": "sk-proj-...",
+      "help": "Inline validator API key override. Prefer apiKeyEnv for normal installs.",
+      "advanced": true
+    },
+    "validator.llm.apiKeyEnv": {
+      "label": "OpenAI API Key Env Var",
+      "placeholder": "KEEP_GOING_OPENAI_API_KEY",
+      "help": "Environment variable that contains the validator OpenAI API key."
+    },
+    "validator.llm.maxMessages": {
+      "label": "Max Messages",
+      "advanced": true
+    },
+    "validator.llm.maxChars": {
+      "label": "Max Characters",
+      "advanced": true
+    },
+    "validator.llm.includeCurrentTurnOnly": {
+      "label": "Current Turn Only",
+      "advanced": true
+    },
+    "validator.llm.recentUserMessages": {
+      "label": "Recent User Messages",
+      "advanced": true
+    },
+    "validator.llm.temperature": {
+      "label": "Validator Temperature",
+      "advanced": true
+    },
+    "validator.llm.timeoutMs": {
+      "label": "Validator Timeout",
+      "advanced": true
+    }
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
       "enabled": {
-        "type": "boolean"
+        "type": "boolean",
+        "default": true,
+        "description": "Enable post-turn continuation checks."
       },
       "debug_logs": {
-        "type": "boolean"
+        "type": "boolean",
+        "default": false,
+        "description": "Emit detailed Keep Going runtime logs."
       },
       "channels": {
         "type": "array",
+        "default": ["slack"],
+        "description": "Eligible channel ids. This plugin currently supports Slack only.",
         "items": {
-          "type": "string"
+          "type": "string",
+          "enum": ["slack"]
         }
       },
       "timeoutMs": {
         "type": "integer",
-        "minimum": 1
+        "minimum": 1,
+        "description": "Maximum runtime for the follow-up agent turn, in milliseconds."
       },
       "validator": {
         "type": "object",
@@ -33,41 +112,55 @@
             "properties": {
               "provider": {
                 "type": "string",
-                "enum": ["openai"]
+                "enum": ["openai"],
+                "default": "openai",
+                "description": "Validator provider. Only OpenAI is currently supported."
               },
               "model": {
-                "type": "string"
+                "type": "string",
+                "default": "gpt-5.4-mini",
+                "description": "OpenAI model used to decide whether a follow-up run is needed."
               },
               "systemPrompt": {
-                "type": "string"
+                "type": "string",
+                "description": "Optional override for the built-in continuation validator prompt."
               },
               "apiKey": {
-                "type": "string"
+                "type": "string",
+                "description": "Inline validator API key override. Prefer apiKeyEnv for normal installs."
               },
               "apiKeyEnv": {
-                "type": "string"
+                "type": "string",
+                "default": "KEEP_GOING_OPENAI_API_KEY",
+                "description": "Environment variable that contains the validator OpenAI API key."
               },
               "maxMessages": {
                 "type": "integer",
-                "minimum": 1
+                "minimum": 1,
+                "default": 10
               },
               "maxChars": {
                 "type": "integer",
-                "minimum": 1
+                "minimum": 1,
+                "default": 20000
               },
               "includeCurrentTurnOnly": {
-                "type": "boolean"
+                "type": "boolean",
+                "default": true
               },
               "recentUserMessages": {
                 "type": "integer",
-                "minimum": 1
+                "minimum": 1,
+                "default": 3
               },
               "temperature": {
-                "type": "number"
+                "type": "number",
+                "default": 0.2
               },
               "timeoutMs": {
                 "type": "integer",
-                "minimum": 1
+                "minimum": 1,
+                "default": 15000
               }
             }
           }

@@ -1,3 +1,4 @@
+import { KEEP_GOING_SYNTHETIC_WAKE_PREFIX } from "./constants.js";
 import { normalizeString } from "./normalize.js";
 import type {
   SlackThreadHistoryMessage,
@@ -22,7 +23,11 @@ function isNoReplyAssistantText(value: string): boolean {
 }
 
 function isSyntheticUserText(value: string): boolean {
-  return value.trim() === CONTINUE_PREVIOUS_TASK_TEXT;
+  const trimmed = value.trim();
+  return (
+    trimmed === CONTINUE_PREVIOUS_TASK_TEXT ||
+    trimmed.startsWith(KEEP_GOING_SYNTHETIC_WAKE_PREFIX)
+  );
 }
 
 function isInternalUserText(value: string): boolean {
@@ -196,6 +201,10 @@ function normalizeTranscriptMessage(message: unknown): TranscriptMessage | undef
     .trim();
 
   if (!text) {
+    return undefined;
+  }
+
+  if (role === "user" && isSyntheticUserText(text)) {
     return undefined;
   }
 

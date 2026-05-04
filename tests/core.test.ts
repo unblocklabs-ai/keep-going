@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { KEEP_GOING_SYNTHETIC_WAKE_PREFIX } from "../src/constants.js";
 import { resolveKeepGoingConfig } from "../src/config.js";
 import { buildValidatorPrompt } from "../src/llm-validator.js";
 import {
@@ -194,6 +195,27 @@ test("normalizeTranscriptMessages skips assistant NO_REPLY content", () => {
   ]);
 });
 
+test("normalizeTranscriptMessages skips synthetic continuation wake prompts", () => {
+  const transcript = normalizeTranscriptMessages([
+    {
+      role: "user",
+      content: [
+        KEEP_GOING_SYNTHETIC_WAKE_PREFIX,
+        "Your previous turn likely ended early while actionable work still remained.",
+        "Resume the same task now.",
+        'Reminder: for a visible, non-turn-terminating update, use `message(action="send", ...)` and then keep working in the same turn.',
+        "Only use a normal assistant reply when you intend to end your turn.",
+        "If you are blocked, state the exact blocker briefly. If already complete, reply `NO_REPLY`.",
+        "Recommended next step: Patch the worker and verify it.",
+      ].join("\n"),
+    },
+    { role: "user", content: "Continue the previous task." },
+    { role: "user", content: "Real user follow-up" },
+  ]);
+
+  assert.deepEqual(transcript, [{ role: "user", text: "Real user follow-up" }]);
+});
+
 test("extractLastAssistantText ignores trailing assistant NO_REPLY messages", () => {
   const lastAssistantText = extractLastAssistantText([
     { role: "assistant", content: [{ type: "output_text", text: "Completed the audit." }] },
@@ -266,9 +288,71 @@ test("clearRun removes stale active replay state for the same run id", () => {
   );
 });
 
+test("session activity tracker does not persist synthetic continuation wake prompts", () => {
+  const tracker = new SessionActivityTracker();
+
+  tracker.markRunStarted({
+    sessionKey: SLACK_SESSION_KEY,
+    runId: "run-1",
+    trigger: "manual",
+    source: "test",
+  });
+
+  tracker.recordTranscriptUpdate({
+    sessionFile: SLACK_SESSION_FILE,
+    sessionKey: SLACK_SESSION_KEY,
+    messageId: "wake-msg-1",
+    message: {
+      role: "user",
+      content: [
+        {
+          type: "input_text",
+          text: [
+            KEEP_GOING_SYNTHETIC_WAKE_PREFIX,
+            "Your previous turn likely ended early while actionable work still remained.",
+            "Resume the same task now.",
+            'Reminder: for a visible, non-turn-terminating update, use `message(action="send", ...)` and then keep working in the same turn.',
+            "Only use a normal assistant reply when you intend to end your turn.",
+            "If you are blocked, state the exact blocker briefly. If already complete, reply `NO_REPLY`.",
+            "Recommended next step: Patch the worker and verify it.",
+          ].join("\n"),
+        },
+      ],
+    },
+  });
+
+  tracker.recordTranscriptUpdate({
+    sessionFile: SLACK_SESSION_FILE,
+    sessionKey: SLACK_SESSION_KEY,
+    messageId: "user-msg-2",
+    message: {
+      role: "user",
+      content: [{ type: "input_text", text: "Real user follow-up" }],
+    },
+  });
+
+  assert.deepEqual(tracker.getRunTranscriptMessages("run-1"), [
+    { role: "user", text: "Real user follow-up" },
+  ]);
+  assert.deepEqual(tracker.getSessionTranscriptMessages(SLACK_SESSION_KEY), [
+    { role: "user", text: "Real user follow-up" },
+  ]);
+});
+
 test("extract human-facing final turn messages skip control text and synthetic continuation prompts", () => {
   const userText = extractLastUserHumanFacingText([
-    { role: "user", content: "Continue the previous task." },
+    {
+      role: "user",
+      content: [
+        KEEP_GOING_SYNTHETIC_WAKE_PREFIX,
+        "Your previous turn likely ended early while actionable work still remained.",
+        "Resume the same task now.",
+        'Reminder: for a visible, non-turn-terminating update, use `message(action="send", ...)` and then keep working in the same turn.',
+        "Only use a normal assistant reply when you intend to end your turn.",
+        "If you are blocked, state the exact blocker briefly. If already complete, reply `NO_REPLY`.",
+        "Recommended next step: Patch the worker and verify it.",
+      ].join("\n"),
+    },
     {
       role: "user",
       content: [

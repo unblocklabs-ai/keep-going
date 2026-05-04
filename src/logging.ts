@@ -1,4 +1,4 @@
-import type { RuntimeLogger } from "openclaw/plugin-sdk";
+import type { RuntimeLogger } from "openclaw/plugin-sdk/core";
 
 const LOG_PREFIX = "Keep-Going Plugin: ";
 

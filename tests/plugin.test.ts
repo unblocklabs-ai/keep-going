@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { OpenClawPluginApi, RuntimeLogger } from "openclaw/plugin-sdk";
+import { KEEP_GOING_SYNTHETIC_WAKE_PREFIX } from "../src/constants.js";
 import { launchContinuation } from "../src/launcher.js";
 import { registerKeepGoingPlugin } from "../src/plugin.js";
 import type { ContinuationValidationContext, LaunchContinuationParams } from "../src/types.js";
@@ -315,6 +316,7 @@ test("continuation launch reuses the last inbound Slack message id and reply con
 test("plugin-triggered continuation flow dispatches assistant replies to the stored Slack thread", async () => {
   const deliveredPayloads: Array<Record<string, unknown>> = [];
   let embeddedPrompt: string | undefined;
+  let embeddedTranscriptPrompt: unknown;
   const { api, hooks, emitTranscriptUpdate } = createMockApi(
     { enabled: true, debug_logs: true },
     {
@@ -329,6 +331,7 @@ test("plugin-triggered continuation flow dispatches assistant replies to the sto
       },
       runEmbeddedPiAgent: async (params: Record<string, unknown>) => {
         embeddedPrompt = typeof params.prompt === "string" ? params.prompt : undefined;
+        embeddedTranscriptPrompt = params.transcriptPrompt;
         await (params.onBlockReply as (payload: { text: string }) => Promise<void>)({
           text: "It woke cleanly on 0.1.8...",
         });
@@ -375,7 +378,17 @@ test("plugin-triggered continuation flow dispatches assistant replies to the sto
     runContext,
   );
 
-  assert.equal(embeddedPrompt, "Continue the previous task.");
+  assert.equal(typeof embeddedPrompt, "string");
+  assert.match(embeddedPrompt ?? "", new RegExp(`^\\${KEEP_GOING_SYNTHETIC_WAKE_PREFIX}`));
+  assert.match(
+    embeddedPrompt ?? "",
+    /Resume the same task now\./,
+  );
+  assert.match(
+    embeddedPrompt ?? "",
+    /Only use a normal assistant reply when you intend to end your turn\./,
+  );
+  assert.equal(embeddedTranscriptPrompt, "");
   assert.equal(deliveredPayloads.length, 1);
   assert.equal(deliveredPayloads[0]?.to, "channel:C123");
   assert.equal(deliveredPayloads[0]?.threadId, "1712345678.000100");

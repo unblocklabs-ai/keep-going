@@ -1,8 +1,9 @@
 {
   "name": "@unblocklabs-ai/openclaw-keep-going",
   "version": "0.2.1",
-  "description": "OpenClaw plugin that starts a same-session follow-up run when the validator sees unfinished work",
+  "description": "OpenClaw Slack continuation plugin that starts a same-session follow-up run when the validator sees unfinished work",
   "type": "module",
+  "main": "./dist/index.js",
   "repository": {
     "type": "git",
     "url": "https://github.com/unblocklabs-ai/keep-going.git"
@@ -16,36 +17,47 @@
     "plugin",
     "slack",
     "agent",
+    "validator",
     "continuation"
   ],
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "test": "node --import tsx --test tests/**/*.test.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "check:runtime": "npm run build && npm run typecheck && npm test",
+    "check:inspector": "node scripts/check-inspector.mjs",
+    "check:install": "node scripts/check-install.mjs",
+    "pack:check": "npm pack --dry-run",
+    "preflight": "npm run check:runtime && npm run check:inspector && npm run check:install && npm run pack:check && npm audit --omit=dev",
+    "release": "node scripts/release.mjs",
+    "release:patch": "node scripts/release.mjs patch",
+    "release:minor": "node scripts/release.mjs minor",
+    "release:major": "node scripts/release.mjs major"
   },
   "files": [
-    "index.ts",
-    "src",
+    "dist",
     "README.md",
     "openclaw.plugin.json",
     ".claude-plugin/marketplace.json"
   ],
   "devDependencies": {
     "@types/node": "^24.6.0",
-    "openclaw": "2026.4.11",
+    "@openclaw/plugin-inspector": "^0.3.10",
+    "openclaw": "2026.5.3",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   },
   "openclaw": {
     "extensions": [
-      "./index.ts"
+      "./dist/index.js"
     ],
     "compat": {
-      "pluginApi": ">=2026.4.9",
-      "minGatewayVersion": "2026.4.9"
+      "pluginApi": ">=2026.5.3",
+      "minGatewayVersion": "2026.5.3"
     },
     "build": {
-      "openclawVersion": "2026.4.9",
-      "pluginSdkVersion": "2026.4.9"
+      "openclawVersion": "2026.5.3",
+      "pluginSdkVersion": "2026.5.3"
     },
     "release": {
       "publishToClawHub": false,

@@ -2,7 +2,10 @@ import crypto from "node:crypto";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
 import { sendTextMediaPayload } from "openclaw/plugin-sdk/reply-payload";
 import { createReplyDispatcher, type ReplyPayload } from "openclaw/plugin-sdk/reply-runtime";
-import { KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX } from "./constants.js";
+import {
+  KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX,
+  KEEP_GOING_SYNTHETIC_WAKE_PREFIX,
+} from "./constants.js";
 import type { KeepGoingLogger } from "./logging.js";
 import type { LaunchContinuationParams } from "./types.js";
 
@@ -16,6 +19,22 @@ export type SessionFileResolverApi = {
     };
   };
 };
+
+function buildContinuationWakePrompt(params: Pick<LaunchContinuationParams, "decision">): string {
+  const instruction = params.decision.followUpInstruction?.trim();
+  const nextStep =
+    instruction || "Perform the next remaining actionable step now.";
+
+  return [
+    KEEP_GOING_SYNTHETIC_WAKE_PREFIX,
+    "Your previous turn likely ended early while actionable work still remained.",
+    "Resume the same task now.",
+    'Reminder: for a visible, non-turn-terminating update, use `message(action="send", ...)` and then keep working in the same turn.',
+    "Only use a normal assistant reply when you intend to end your turn.",
+    "If you are blocked, state the exact blocker briefly. If already complete, reply `NO_REPLY`.",
+    `Recommended next step: ${nextStep}`,
+  ].join("\n");
+}
 
 export function resolveContinuationSessionFile(
   api: SessionFileResolverApi,
@@ -81,15 +100,7 @@ export async function launchContinuation(
   const followUpRunId = `${KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX}${crypto.randomUUID()}`;
   const provider = params.sessionRoute.modelProviderId ?? params.candidate.modelProviderId;
   const model = params.sessionRoute.modelId ?? params.candidate.modelId;
-  const extraSystemPrompt = [
-    "A completion validator flagged the previous turn as possibly incomplete.",
-    "The validator may be wrong.",
-    "If the previous turn was actually complete, reply exactly NO_REPLY and stop.",
-    "If you are truly blocked, state the exact blocker briefly and stop.",
-    params.decision.followUpInstruction ??
-      "Otherwise, perform the next remaining actionable step now.",
-    "Before your first tool call, send a brief interim update that you are continuing the remaining work from the previous turn.",
-  ].join("\n");
+  const prompt = buildContinuationWakePrompt(params);
 
   logger?.step("attempting continuation wake", {
     runId: params.candidate.runId,
@@ -170,7 +181,8 @@ export async function launchContinuation(
       sessionFile: params.sessionFile,
       workspaceDir: params.candidate.workspaceDir,
       config: api.config,
-      prompt: "Continue the previous task.",
+      prompt,
+      transcriptPrompt: "",
       provider,
       model,
       authProfileId: params.sessionRoute.authProfileId,
@@ -192,7 +204,6 @@ export async function launchContinuation(
       onToolResult: async (payload) => {
         replyDispatcher.sendToolResult(payload);
       },
-      extraSystemPrompt,
     });
   } catch (error) {
     runError = error;

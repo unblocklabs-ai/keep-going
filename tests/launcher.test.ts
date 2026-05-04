@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
+import { KEEP_GOING_SYNTHETIC_WAKE_PREFIX } from "../src/constants.js";
 import { launchContinuation } from "../src/launcher.js";
 import type { LaunchContinuationParams } from "../src/types.js";
 
@@ -46,7 +47,7 @@ function createLaunchParams(): LaunchContinuationParams {
   };
 }
 
-test("plugin-started continuation replies route to the stored Slack thread even with a bare synthetic wake prompt", async () => {
+test("plugin-started continuation replies route to the stored Slack thread with the synthetic wake prompt", async () => {
   const params = createLaunchParams();
   const deliveredPayloads: Array<Record<string, unknown>> = [];
   let embeddedParams: Record<string, unknown> | undefined;
@@ -80,7 +81,25 @@ test("plugin-started continuation replies route to the stored Slack thread even 
       agent: {
         runEmbeddedPiAgent: async (runParams: Record<string, unknown>) => {
           embeddedParams = runParams;
-          assert.equal(runParams.prompt, "Continue the previous task.");
+          assert.equal(typeof runParams.prompt, "string");
+          assert.match(String(runParams.prompt), new RegExp(`^\\${KEEP_GOING_SYNTHETIC_WAKE_PREFIX}`));
+          assert.match(
+            String(runParams.prompt),
+            /Resume the same task now\./,
+          );
+          assert.match(
+            String(runParams.prompt),
+            /Only use a normal assistant reply when you intend to end your turn\./,
+          );
+          assert.match(
+            String(runParams.prompt),
+            /If you are blocked, state the exact blocker briefly\. If already complete, reply `NO_REPLY`\./,
+          );
+          assert.match(
+            String(runParams.prompt),
+            /Recommended next step: Keep going until the task is complete\./,
+          );
+          assert.equal(runParams.transcriptPrompt, "");
           assert.equal(typeof runParams.onBlockReply, "function");
           assert.equal(typeof runParams.onToolResult, "function");
 

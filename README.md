@@ -23,6 +23,11 @@ Turn B is advisory. It is explicitly told to stop immediately if the previous tu
 
 ## Install
 
+Prerequisites:
+
+- OpenClaw `2026.5.3` or newer
+- `KEEP_GOING_OPENAI_API_KEY` available to the OpenClaw gateway process, unless `validator.llm.apiKey` is configured directly
+
 Remote install:
 
 ```bash
@@ -34,6 +39,10 @@ Local iteration:
 
 ```bash
 git clone https://github.com/unblocklabs-ai/keep-going.git
+cd keep-going
+npm install
+npm run build
+cd ..
 openclaw plugins install --link ./keep-going
 openclaw plugins enable keep-going
 ```
@@ -73,6 +82,9 @@ The plugin exposes a small config surface through `openclaw.plugin.json`:
 
 Notes:
 
+- `enabled` defaults to `true`
+- `channels` defaults to `["slack"]`; other channels are ignored
+- `validator.llm.model` defaults to `gpt-5.4-mini`
 - `validator.llm.apiKeyEnv` is the normal way to provide credentials
 - `validator.llm.apiKey` is supported but usually not desirable
 - `includeCurrentTurnOnly` keeps the validator focused on the current task while still allowing a small amount of recent context
@@ -98,9 +110,71 @@ Run the plugin tests with:
 npm test
 ```
 
+Run the local plugin preflight with:
+
+```bash
+npm run preflight
+```
+
+The preflight follows the same narrow check shape as OpenClaw's Kitchen Sink fixture: runtime checks, plugin-inspector package inspection, install-shape checks, package dry-run, and runtime dependency audit. Set `OPENCLAW_CHECKOUT=/path/to/openclaw` to force inspector compatibility checks against a specific local OpenClaw checkout. The inspector step fails if no checkout is available unless `CHECK_INSPECTOR_ALLOW_NO_OPENCLAW=1` is set.
+
+## Release
+
+This plugin is deployed by pushing this GitHub repo. It is not published to npm or ClawHub.
+
+For marketplace installs like:
+
+```bash
+openclaw plugins install keep-going --marketplace unblocklabs-ai/keep-going
+```
+
+OpenClaw resolves the plugin from this repo's marketplace manifest, so a deployable release should keep these files in sync:
+
+- `package.json`
+- `package-lock.json`
+- `openclaw.plugin.json`
+- `.claude-plugin/marketplace.json`
+
+Use the release script from the repo root:
+
+```bash
+npm run release -- patch
+```
+
+You can also use:
+
+```bash
+npm run release:patch
+npm run release:minor
+npm run release:major
+```
+
+What it does:
+
+- bumps the version in all release metadata files
+- runs `npm run preflight`
+- emits `dist/index.js`
+- stages only release metadata and `dist/`
+- commits with `release: vX.Y.Z`
+- pushes the current `main` branch to `origin`
+
+Useful flags:
+
+```bash
+npm run release -- 0.3.0 --dry-run
+npm run release -- patch --message "release: v0.3.0 keep-going wake prompt fix"
+```
+
+After pushing, OpenClaw installs can pick up the new repo state and existing installs can update with:
+
+```bash
+openclaw plugins update keep-going
+```
+
 ## Repository Layout
 
 - `index.ts` registers the native plugin entry
+- `dist/index.js` is the compiled plugin entry loaded by OpenClaw
 - `src/plugin.ts` wires the event hooks, validator call, and continuation launch flow
 - `src/llm-validator.ts` builds the transcript window and calls the structured validator response
 - `src/session-route.ts` restores Slack routing and auth continuity from session metadata

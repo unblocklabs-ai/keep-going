@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "submoduleRoot": ".",
+  "fixtures": [
+    {
+      "id": "keep-going",
+      "name": "Keep Going",
+      "path": ".",
+      "repo": "local",
+      "priority": "high",
+      "seams": ["plugin-runtime"],
+      "why": "post-turn continuation plugin loaded through OpenClaw runtime hooks"
+    }
+  ]
+}
