@@ -32,9 +32,14 @@
       "openclawVersion": "2026.5.3",
       "pluginSdkVersion": "2026.5.3"
     },
+    "install": {
+      "npmSpec": "@unblocklabs/openclaw-keep-going",
+      "defaultChoice": "npm",
+      "minHostVersion": ">=2026.5.3"
+    },
     "release": {
       "publishToClawHub": false,
-      "publishToNpm": false
+      "publishToNpm": true
     }
   },
   "files": [

@@ -124,7 +124,7 @@ The preflight follows the same narrow check shape as OpenClaw's Kitchen Sink fix
 
 ## Release
 
-This plugin is deployed by pushing this GitHub repo. It is not published to npm or ClawHub.
+This plugin is released from one repo version. The release script keeps the GitHub tag/release, npm package, and OpenClaw marketplace install mirror on the same version.
 
 For marketplace installs like:
 
@@ -168,13 +168,18 @@ What it does:
 - refreshes and stages the marketplace package mirror
 - stages only release metadata, `dist/`, and `marketplace/keep-going/`
 - commits with `release: vX.Y.Z`
-- pushes the current `main` branch to `origin`
+- creates an annotated `vX.Y.Z` git tag
+- pushes the current `main` branch and tag to `origin`
+- publishes `@unblocklabs/openclaw-keep-going@X.Y.Z` to npm when `openclaw.release.publishToNpm` is enabled
+- creates a GitHub release for `vX.Y.Z`
 
 Useful flags:
 
 ```bash
 npm run release -- 0.3.0 --dry-run
 npm run release -- patch --message "release: v0.3.0 keep-going wake prompt fix"
+npm run release -- patch --no-npm
+npm run release -- patch --no-github-release
 ```
 
 After pushing, OpenClaw installs can pick up the new repo state and existing installs can update with:

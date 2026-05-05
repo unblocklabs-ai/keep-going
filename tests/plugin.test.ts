@@ -765,6 +765,48 @@ test("debug_logs emits prefixed step logs when enabled", async () => {
   );
 });
 
+test("debug logs redact transcript-like metadata from conversation access hooks", async () => {
+  const secret = "customer-secret-token-123";
+  const { api, hooks, logs } = createMockApi({ enabled: true, debug_logs: true });
+
+  registerKeepGoingPlugin(api, {
+    validateContinuationWithLlm: async () => ({
+      continue: false,
+      reason: `validator echoed ${secret}`,
+      followUpInstruction: `continue with ${secret}`,
+      validatorModel: "gpt-5.4-mini",
+    }),
+    launchContinuation: async () => ({ followUpRunId: "follow-up-1" }),
+  });
+
+  const beforeModelResolve = hooks.get("before_model_resolve");
+  const agentEnd = hooks.get("agent_end");
+  const runContext = createRunContext();
+
+  await beforeModelResolve?.({ prompt: `Please handle ${secret}` }, runContext);
+  await agentEnd?.(
+    {
+      success: true,
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "input_text", text: `My secret is ${secret}` }],
+        },
+      ],
+    },
+    runContext,
+  );
+
+  const serializedLogs = JSON.stringify(logs);
+  assert.equal(serializedLogs.includes(secret), false);
+
+  const validatorLog = logs.info.find(
+    (entry) => entry.message === "Keep-Going Plugin: validator completed",
+  );
+  assert.equal(validatorLog?.meta?.reason, "[redacted]");
+  assert.equal(validatorLog?.meta?.hasFollowUpInstruction, true);
+});
+
 test("debug_logs suppresses step logs when disabled", async () => {
   const { api, hooks, logs } = createMockApi({ enabled: true, debug_logs: false });
 
