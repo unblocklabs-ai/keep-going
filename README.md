@@ -1,4 +1,4 @@
-![Keep Going banner](https://raw.githubusercontent.com/unblocklabs-ai/keep-going/main/docs/keep-going-banner.jpg)
+![Keep Going banner](https://raw.githubusercontent.com/unblocklabs-ai/keep-going/main/docs/keep-going-banner.webp)
 
 # Keep Going
 
