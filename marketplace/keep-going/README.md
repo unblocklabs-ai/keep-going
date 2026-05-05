@@ -28,7 +28,7 @@ Turn B is advisory. It is explicitly told to stop immediately if the previous tu
 Prerequisites:
 
 - OpenClaw `2026.5.3` or newer
-- `KEEP_GOING_OPENAI_API_KEY` available to the OpenClaw gateway process, unless `validator.llm.apiKey` is configured directly
+- `OPENAI_API_KEY` available to the OpenClaw gateway process, or `KEEP_GOING_OPENAI_API_KEY` when the validator should use a plugin-specific key
 
 Remote install:
 
@@ -91,8 +91,9 @@ Notes:
 - `channels` defaults to `["slack"]`; other channels are ignored
 - `continuationReaction.enabled` defaults to `true`; when enabled, the plugin adds an `eyes` reaction to the assistant Slack message only after the validator approves a continuation
 - `validator.llm.model` defaults to `gpt-5.4-mini`
-- `validator.llm.apiKeyEnv` is the normal way to provide credentials
-- `validator.llm.apiKey` is supported but usually not desirable
+- `validator.llm.apiKeyEnv` defaults to `KEEP_GOING_OPENAI_API_KEY`, which overrides the shared `OPENAI_API_KEY` when set
+- `OPENAI_API_KEY` is used as the fallback validator credential so normal OpenClaw OpenAI config works without extra plugin setup
+- `validator.llm.apiKey` is supported as the highest-priority inline override, but usually not desirable
 - `includeCurrentTurnOnly` keeps the validator focused on the current task while still allowing a small amount of recent context
 - `debug_logs: true` enables structured step-by-step plugin logging; when `false`, only error logs are emitted
 

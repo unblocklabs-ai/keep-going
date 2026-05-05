@@ -49,13 +49,13 @@
       "label": "OpenAI API Key",
       "sensitive": true,
       "placeholder": "sk-proj-...",
-      "help": "Inline validator API key override. Prefer apiKeyEnv for normal installs.",
+      "help": "Inline validator API key override. Prefer environment variables for normal installs.",
       "advanced": true
     },
     "validator.llm.apiKeyEnv": {
       "label": "OpenAI API Key Env Var",
       "placeholder": "KEEP_GOING_OPENAI_API_KEY",
-      "help": "Environment variable that contains the validator OpenAI API key."
+      "help": "Plugin-specific validator API key env var. When unset, the validator falls back to OPENAI_API_KEY."
     },
     "validator.llm.maxMessages": {
       "label": "Max Messages",
@@ -168,12 +168,12 @@
               },
               "apiKey": {
                 "type": "string",
-                "description": "Inline validator API key override. Prefer apiKeyEnv for normal installs."
+                "description": "Inline validator API key override. Prefer environment variables for normal installs."
               },
               "apiKeyEnv": {
                 "type": "string",
                 "default": "KEEP_GOING_OPENAI_API_KEY",
-                "description": "Environment variable that contains the validator OpenAI API key."
+                "description": "Plugin-specific validator API key env var. When unset, the validator falls back to OPENAI_API_KEY."
               },
               "maxMessages": {
                 "type": "integer",

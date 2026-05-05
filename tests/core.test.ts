@@ -16,6 +16,7 @@ import {
   normalizeHumanFacingUserText,
   normalizeTranscriptMessages,
 } from "../src/messages.js";
+import { resolveLlmApiKey } from "../src/openai-api-key.js";
 import { createDefaultOpenAiValidatorConfig } from "../src/openai-validator-config.js";
 import { SessionActivityTracker } from "../src/session-activity.js";
 import { resolveSessionRoute, type SessionRouteApi } from "../src/session-route.js";
@@ -143,6 +144,81 @@ test("shared default validator config matches runtime plugin defaults", () => {
     resolveKeepGoingConfig({}).validator.llm,
     createDefaultOpenAiValidatorConfig(),
   );
+});
+
+test("validator API key resolution falls back to shared OpenAI env", () => {
+  const previousOpenAi = process.env.OPENAI_API_KEY;
+  const previousKeepGoing = process.env.KEEP_GOING_OPENAI_API_KEY;
+  try {
+    delete process.env.KEEP_GOING_OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = "shared-openai-key";
+
+    assert.equal(
+      resolveLlmApiKey(createDefaultOpenAiValidatorConfig()),
+      "shared-openai-key",
+    );
+  } finally {
+    if (previousOpenAi === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = previousOpenAi;
+    }
+    if (previousKeepGoing === undefined) {
+      delete process.env.KEEP_GOING_OPENAI_API_KEY;
+    } else {
+      process.env.KEEP_GOING_OPENAI_API_KEY = previousKeepGoing;
+    }
+  }
+});
+
+test("validator API key resolution prefers plugin-specific override env", () => {
+  const previousOpenAi = process.env.OPENAI_API_KEY;
+  const previousKeepGoing = process.env.KEEP_GOING_OPENAI_API_KEY;
+  try {
+    process.env.OPENAI_API_KEY = "shared-openai-key";
+    process.env.KEEP_GOING_OPENAI_API_KEY = "plugin-openai-key";
+
+    assert.equal(
+      resolveLlmApiKey(createDefaultOpenAiValidatorConfig()),
+      "plugin-openai-key",
+    );
+  } finally {
+    if (previousOpenAi === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = previousOpenAi;
+    }
+    if (previousKeepGoing === undefined) {
+      delete process.env.KEEP_GOING_OPENAI_API_KEY;
+    } else {
+      process.env.KEEP_GOING_OPENAI_API_KEY = previousKeepGoing;
+    }
+  }
+});
+
+test("validator API key resolution prefers inline override", () => {
+  const previousOpenAi = process.env.OPENAI_API_KEY;
+  const previousKeepGoing = process.env.KEEP_GOING_OPENAI_API_KEY;
+  try {
+    process.env.OPENAI_API_KEY = "shared-openai-key";
+    process.env.KEEP_GOING_OPENAI_API_KEY = "plugin-openai-key";
+
+    assert.equal(
+      resolveLlmApiKey(createDefaultOpenAiValidatorConfig({ apiKey: "inline-openai-key" })),
+      "inline-openai-key",
+    );
+  } finally {
+    if (previousOpenAi === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = previousOpenAi;
+    }
+    if (previousKeepGoing === undefined) {
+      delete process.env.KEEP_GOING_OPENAI_API_KEY;
+    } else {
+      process.env.KEEP_GOING_OPENAI_API_KEY = previousKeepGoing;
+    }
+  }
 });
 
 test("continuation reaction config defaults enabled", () => {

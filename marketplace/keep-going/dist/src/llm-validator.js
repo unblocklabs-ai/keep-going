@@ -175,7 +175,11 @@ function normalizeDecision(parsed, fallbackModel) {
 export async function validateContinuationWithLlm(input) {
     const apiKey = resolveLlmApiKey(input.config);
     if (!apiKey) {
-        throw new Error(`missing OpenAI API key for validator; set ${input.config.apiKeyEnv ?? "an apiKey"}`);
+        const configuredEnv = input.config.apiKeyEnv?.trim();
+        const envHint = configuredEnv && configuredEnv !== "OPENAI_API_KEY"
+            ? `${configuredEnv} or OPENAI_API_KEY`
+            : "OPENAI_API_KEY";
+        throw new Error(`missing OpenAI API key for validator; set ${envHint}`);
     }
     input.logger?.step("preparing validator input", {
         runId: input.candidate.runId,
