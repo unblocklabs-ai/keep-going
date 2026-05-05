@@ -1,7 +1,7 @@
 {
   "id": "keep-going",
   "name": "Keep Going",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Starts one same-session Slack follow-up run when a validator decides the assistant stopped before finishing actionable work.",
   "activation": {
     "onStartup": true,
@@ -54,6 +54,12 @@
     "validator.llm.systemPrompt": {
       "label": "Validator System Prompt",
       "help": "Optional override for the built-in continuation validator prompt.",
+      "advanced": true
+    },
+    "validator.llm.apiKeyRef": {
+      "label": "OpenAI API Key SecretRef",
+      "sensitive": true,
+      "help": "OpenClaw SecretRef for the validator API key. When configured and resolvable, this takes precedence over apiKey and apiKeyEnv.",
       "advanced": true
     },
     "validator.llm.apiKey": {
@@ -198,6 +204,32 @@
               "systemPrompt": {
                 "type": "string",
                 "description": "Optional override for the built-in continuation validator prompt."
+              },
+              "apiKeyRef": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "OpenClaw SecretRef for the validator API key. When configured and resolvable, this takes precedence over apiKey and apiKeyEnv.",
+                "properties": {
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "env",
+                      "file",
+                      "exec"
+                    ]
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "source",
+                  "provider",
+                  "id"
+                ]
               },
               "apiKey": {
                 "type": "string",

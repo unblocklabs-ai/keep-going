@@ -40,5 +40,8 @@ export function createDefaultOpenAiValidatorConfig(overrides = {}) {
     if (config.apiKey === undefined) {
         delete config.apiKey;
     }
+    if (config.apiKeyRef === undefined) {
+        delete config.apiKeyRef;
+    }
     return config;
 }

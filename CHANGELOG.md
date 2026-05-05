@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.3 - 2026-05-05
+
+- Added `validator.llm.apiKeyRef` support for OpenClaw SecretRef-backed validator API keys.
+- Preserved existing inline `apiKey`, `apiKeyEnv`, shared OpenAI config, and `OPENAI_API_KEY` fallback behavior.
+- Added clear SecretRef resolution warnings that include the config path and ref metadata without logging secret values.
+
 ## 0.3.1 - 2026-05-05
 
 - Fixed validator credential resolution to fall back to shared `OPENAI_API_KEY` when `KEEP_GOING_OPENAI_API_KEY` is not set.

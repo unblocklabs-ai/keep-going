@@ -1,4 +1,6 @@
+import { isSecretRef, resolveConfiguredSecretInputString, } from "openclaw/plugin-sdk/secret-input-runtime";
 const DEFAULT_OPENAI_API_KEY_ENV = "OPENAI_API_KEY";
+const API_KEY_REF_CONFIG_PATH = "plugins.entries.keep-going.config.validator.llm.apiKeyRef";
 function readProcessEnvValue(name) {
     const envKeyName = name?.trim();
     if (!envKeyName) {
@@ -39,7 +41,11 @@ function readResolvedProviderApiKey(config) {
     }
     return normalized;
 }
-export function resolveLlmApiKey(config, runtimeConfig) {
+export async function resolveLlmApiKey(config, runtimeConfig, options = {}) {
+    const secretRefApiKey = await resolveLlmApiKeyRef(config.apiKeyRef, runtimeConfig, options);
+    if (secretRefApiKey) {
+        return secretRefApiKey;
+    }
     const inlineApiKey = config.apiKey?.trim();
     if (inlineApiKey) {
         return inlineApiKey;
@@ -49,4 +55,30 @@ export function resolveLlmApiKey(config, runtimeConfig) {
         readConfigEnvValue(runtimeConfig, DEFAULT_OPENAI_API_KEY_ENV) ??
         readResolvedProviderApiKey(runtimeConfig) ??
         readProcessEnvValue(DEFAULT_OPENAI_API_KEY_ENV));
+}
+async function resolveLlmApiKeyRef(value, runtimeConfig, options) {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (!isSecretRef(value)) {
+        return undefined;
+    }
+    const resolved = await resolveConfiguredSecretInputString({
+        config: (runtimeConfig ?? {}),
+        env: process.env,
+        value,
+        path: API_KEY_REF_CONFIG_PATH,
+        unresolvedReasonStyle: "detailed",
+    });
+    if (resolved.value) {
+        return resolved.value;
+    }
+    options.logger?.warn("validator API key SecretRef could not be resolved", {
+        path: API_KEY_REF_CONFIG_PATH,
+        source: value.source,
+        provider: value.provider,
+        id: value.id,
+        reason: resolved.unresolvedRefReason ?? "SecretRef is not available",
+    });
+    return undefined;
 }

@@ -253,7 +253,9 @@ function normalizeDecision(
 export async function validateContinuationWithLlm(
   input: LlmValidatorInput,
 ): Promise<LlmValidatorOutput> {
-  const apiKey = resolveLlmApiKey(input.config, input.runtimeConfig);
+  const apiKey = await resolveLlmApiKey(input.config, input.runtimeConfig, {
+    logger: input.logger,
+  });
   if (!apiKey) {
     const configuredEnv = input.config.apiKeyEnv?.trim();
     const envHint = configuredEnv && configuredEnv !== "OPENAI_API_KEY"

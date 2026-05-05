@@ -146,7 +146,154 @@ test("shared default validator config matches runtime plugin defaults", () => {
   );
 });
 
-test("validator API key resolution falls back to shared OpenAI env", () => {
+test("validator API key resolution prefers SecretRef over inline and env", async () => {
+  const previousOpenAi = process.env.OPENAI_API_KEY;
+  const previousKeepGoing = process.env.KEEP_GOING_OPENAI_API_KEY;
+  const previousSecretRef = process.env.KEEP_GOING_SECRET_REF_KEY;
+  try {
+    process.env.OPENAI_API_KEY = "shared-openai-key";
+    process.env.KEEP_GOING_OPENAI_API_KEY = "plugin-openai-key";
+    process.env.KEEP_GOING_SECRET_REF_KEY = "secret-ref-openai-key";
+
+    assert.equal(
+      await resolveLlmApiKey(
+        createDefaultOpenAiValidatorConfig({
+          apiKeyRef: {
+            source: "env",
+            provider: "local",
+            id: "KEEP_GOING_SECRET_REF_KEY",
+          },
+          apiKey: "inline-openai-key",
+        }),
+        {
+          secrets: {
+            providers: {
+              local: {
+                source: "env",
+              },
+            },
+          },
+        },
+      ),
+      "secret-ref-openai-key",
+    );
+  } finally {
+    if (previousOpenAi === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = previousOpenAi;
+    }
+    if (previousKeepGoing === undefined) {
+      delete process.env.KEEP_GOING_OPENAI_API_KEY;
+    } else {
+      process.env.KEEP_GOING_OPENAI_API_KEY = previousKeepGoing;
+    }
+    if (previousSecretRef === undefined) {
+      delete process.env.KEEP_GOING_SECRET_REF_KEY;
+    } else {
+      process.env.KEEP_GOING_SECRET_REF_KEY = previousSecretRef;
+    }
+  }
+});
+
+test("validator API key resolution preserves SecretRef through plugin config normalization", async () => {
+  const previousSecretRef = process.env.KEEP_GOING_SECRET_REF_KEY;
+  try {
+    process.env.KEEP_GOING_SECRET_REF_KEY = "normalized-secret-ref-openai-key";
+
+    const config = resolveKeepGoingConfig({
+      validator: {
+        llm: {
+          apiKeyRef: {
+            source: "env",
+            provider: "local",
+            id: "KEEP_GOING_SECRET_REF_KEY",
+          },
+          apiKey: "inline-openai-key",
+        },
+      },
+    });
+
+    assert.deepEqual(config.validator.llm.apiKeyRef, {
+      source: "env",
+      provider: "local",
+      id: "KEEP_GOING_SECRET_REF_KEY",
+    });
+    assert.equal(
+      await resolveLlmApiKey(config.validator.llm, {
+        secrets: {
+          providers: {
+            local: {
+              source: "env",
+            },
+          },
+        },
+      }),
+      "normalized-secret-ref-openai-key",
+    );
+  } finally {
+    if (previousSecretRef === undefined) {
+      delete process.env.KEEP_GOING_SECRET_REF_KEY;
+    } else {
+      process.env.KEEP_GOING_SECRET_REF_KEY = previousSecretRef;
+    }
+  }
+});
+
+test("failed validator API key SecretRef warning does not expose fallback secret values", async () => {
+  const previousOpenAi = process.env.OPENAI_API_KEY;
+  const warnings: Array<{ message: string; meta?: Record<string, unknown> }> = [];
+  try {
+    process.env.OPENAI_API_KEY = "shared-openai-key-that-must-not-be-logged";
+
+    const apiKey = await resolveLlmApiKey(
+      createDefaultOpenAiValidatorConfig({
+        apiKeyRef: {
+          source: "env",
+          provider: "local",
+          id: "MISSING_KEEP_GOING_SECRET_REF_KEY",
+        },
+      }),
+      {
+        secrets: {
+          providers: {
+            local: {
+              source: "env",
+            },
+          },
+        },
+      },
+      {
+        logger: {
+          warn: (message, meta) => warnings.push({ message, meta }),
+        },
+      },
+    );
+
+    assert.equal(apiKey, "shared-openai-key-that-must-not-be-logged");
+    assert.equal(warnings.length, 1);
+    assert.equal(warnings[0]?.message, "validator API key SecretRef could not be resolved");
+    assert.equal(
+      warnings[0]?.meta?.path,
+      "plugins.entries.keep-going.config.validator.llm.apiKeyRef",
+    );
+    assert.equal(warnings[0]?.meta?.source, "env");
+    assert.equal(warnings[0]?.meta?.provider, "local");
+    assert.equal(warnings[0]?.meta?.id, "MISSING_KEEP_GOING_SECRET_REF_KEY");
+    assert.equal(
+      JSON.stringify(warnings).includes("shared-openai-key-that-must-not-be-logged"),
+      false,
+    );
+  } finally {
+    if (previousOpenAi === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = previousOpenAi;
+    }
+  }
+});
+
+test("validator API key resolution falls back to shared OpenAI env", async () => {
   const previousOpenAi = process.env.OPENAI_API_KEY;
   const previousKeepGoing = process.env.KEEP_GOING_OPENAI_API_KEY;
   try {
@@ -154,7 +301,7 @@ test("validator API key resolution falls back to shared OpenAI env", () => {
     process.env.OPENAI_API_KEY = "shared-openai-key";
 
     assert.equal(
-      resolveLlmApiKey(createDefaultOpenAiValidatorConfig()),
+      await resolveLlmApiKey(createDefaultOpenAiValidatorConfig()),
       "shared-openai-key",
     );
   } finally {
@@ -171,7 +318,7 @@ test("validator API key resolution falls back to shared OpenAI env", () => {
   }
 });
 
-test("validator API key resolution prefers plugin-specific override env", () => {
+test("validator API key resolution prefers plugin-specific override env", async () => {
   const previousOpenAi = process.env.OPENAI_API_KEY;
   const previousKeepGoing = process.env.KEEP_GOING_OPENAI_API_KEY;
   try {
@@ -179,7 +326,7 @@ test("validator API key resolution prefers plugin-specific override env", () => 
     process.env.KEEP_GOING_OPENAI_API_KEY = "plugin-openai-key";
 
     assert.equal(
-      resolveLlmApiKey(createDefaultOpenAiValidatorConfig()),
+      await resolveLlmApiKey(createDefaultOpenAiValidatorConfig()),
       "plugin-openai-key",
     );
   } finally {
@@ -196,7 +343,7 @@ test("validator API key resolution prefers plugin-specific override env", () => 
   }
 });
 
-test("validator API key resolution prefers inline override", () => {
+test("validator API key resolution prefers inline override", async () => {
   const previousOpenAi = process.env.OPENAI_API_KEY;
   const previousKeepGoing = process.env.KEEP_GOING_OPENAI_API_KEY;
   try {
@@ -204,7 +351,7 @@ test("validator API key resolution prefers inline override", () => {
     process.env.KEEP_GOING_OPENAI_API_KEY = "plugin-openai-key";
 
     assert.equal(
-      resolveLlmApiKey(createDefaultOpenAiValidatorConfig({ apiKey: "inline-openai-key" })),
+      await resolveLlmApiKey(createDefaultOpenAiValidatorConfig({ apiKey: "inline-openai-key" })),
       "inline-openai-key",
     );
   } finally {
@@ -221,7 +368,7 @@ test("validator API key resolution prefers inline override", () => {
   }
 });
 
-test("validator API key resolution uses OpenClaw config env before process env", () => {
+test("validator API key resolution uses OpenClaw config env before process env", async () => {
   const previousOpenAi = process.env.OPENAI_API_KEY;
   const previousKeepGoing = process.env.KEEP_GOING_OPENAI_API_KEY;
   try {
@@ -229,7 +376,7 @@ test("validator API key resolution uses OpenClaw config env before process env",
     process.env.KEEP_GOING_OPENAI_API_KEY = "process-plugin-openai-key";
 
     assert.equal(
-      resolveLlmApiKey(createDefaultOpenAiValidatorConfig(), {
+      await resolveLlmApiKey(createDefaultOpenAiValidatorConfig(), {
         env: {
           vars: {
             KEEP_GOING_OPENAI_API_KEY: "config-plugin-openai-key",
@@ -253,7 +400,7 @@ test("validator API key resolution uses OpenClaw config env before process env",
   }
 });
 
-test("validator API key resolution falls back to resolved OpenClaw provider key", () => {
+test("validator API key resolution falls back to resolved OpenClaw provider key", async () => {
   const previousOpenAi = process.env.OPENAI_API_KEY;
   const previousKeepGoing = process.env.KEEP_GOING_OPENAI_API_KEY;
   try {
@@ -261,7 +408,7 @@ test("validator API key resolution falls back to resolved OpenClaw provider key"
     delete process.env.KEEP_GOING_OPENAI_API_KEY;
 
     assert.equal(
-      resolveLlmApiKey(createDefaultOpenAiValidatorConfig(), {
+      await resolveLlmApiKey(createDefaultOpenAiValidatorConfig(), {
         models: {
           providers: {
             openai: {

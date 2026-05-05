@@ -28,7 +28,7 @@ Turn B is advisory. It is explicitly told to stop immediately if the previous tu
 Prerequisites:
 
 - OpenClaw `2026.5.3` or newer
-- `OPENAI_API_KEY` available to the OpenClaw gateway process, or `KEEP_GOING_OPENAI_API_KEY` when the validator should use a plugin-specific key
+- an OpenAI validator key configured through `validator.llm.apiKeyRef`, `validator.llm.apiKey`, `KEEP_GOING_OPENAI_API_KEY`, or shared `OPENAI_API_KEY`
 
 Remote install:
 
@@ -77,6 +77,11 @@ The plugin exposes a small config surface through `openclaw.plugin.json`:
     "llm": {
       "model": "gpt-5.4-mini",
       "systemPrompt": "Optional override for the built-in continuation validator prompt.",
+      "apiKeyRef": {
+        "source": "file",
+        "provider": "openai_keys",
+        "id": "/KEEP_GOING_OPENAI_API_KEY"
+      },
       "apiKeyEnv": "KEEP_GOING_OPENAI_API_KEY",
       "maxMessages": 10,
       "maxChars": 20000,
@@ -96,11 +101,28 @@ Notes:
 - `continuationReaction.enabled` defaults to `true`; when enabled, the plugin adds an `eyes` reaction to the assistant Slack message only after the validator approves a continuation and the assistant message id is a Slack timestamp
 - `continuationNotice.mode` defaults to `fallbackOnly`; if the reaction is skipped or fails, the plugin posts `:eyes: continuing...` in the Slack thread so users can see the continuation fired
 - `validator.llm.model` defaults to `gpt-5.4-mini`
+- `validator.llm.apiKeyRef` accepts an OpenClaw SecretRef and takes precedence over inline/env key settings when it resolves successfully
+- `validator.llm.apiKey` is supported as the inline override after `apiKeyRef`, but usually not desirable
 - `validator.llm.apiKeyEnv` defaults to `KEEP_GOING_OPENAI_API_KEY`, which overrides the shared `OPENAI_API_KEY` when set
-- `OPENAI_API_KEY` is used as the fallback validator credential from OpenClaw config env or process env so normal OpenClaw OpenAI config works without extra plugin setup
-- `validator.llm.apiKey` is supported as the highest-priority inline override, but usually not desirable
+- `OPENAI_API_KEY` is used as the fallback validator credential from OpenClaw config env, configured OpenAI provider auth, or process env so normal OpenClaw OpenAI config works without extra plugin setup
 - `includeCurrentTurnOnly` keeps the validator focused on the current task while still allowing a small amount of recent context
 - `debug_logs: true` enables structured step-by-step plugin logging; when `false`, only error logs are emitted
+
+For the `apiKeyRef` example above, define the matching file provider in OpenClaw config:
+
+```json
+{
+  "secrets": {
+    "providers": {
+      "openai_keys": {
+        "source": "file",
+        "path": "~/.openclaw/secrets.json",
+        "mode": "json"
+      }
+    }
+  }
+}
+```
 
 ## Runtime Behavior
 

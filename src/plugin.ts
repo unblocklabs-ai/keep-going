@@ -682,12 +682,20 @@ export function registerKeepGoingPlugin(
     timeoutMs: config.timeoutMs,
     validatorModel: config.validator.llm.model,
   });
-  if (!resolveLlmApiKey(config.validator.llm, api.config)) {
-    runtime.logger.warn("validator API key not resolved", {
-      validatorModel: config.validator.llm.model,
-      apiKeyEnv: config.validator.llm.apiKeyEnv,
-      fallbackEnv: "OPENAI_API_KEY",
-      hasInlineApiKey: Boolean(config.validator.llm.apiKey),
+  if (config.enabled) {
+    void resolveLlmApiKey(config.validator.llm, api.config, {
+      logger: runtime.logger,
+    }).then((apiKey) => {
+      if (apiKey) {
+        return;
+      }
+      runtime.logger.warn("validator API key not resolved", {
+        validatorModel: config.validator.llm.model,
+        apiKeyEnv: config.validator.llm.apiKeyEnv,
+        fallbackEnv: "OPENAI_API_KEY",
+        hasApiKeyRef: Boolean(config.validator.llm.apiKeyRef),
+        hasInlineApiKey: Boolean(config.validator.llm.apiKey),
+      });
     });
   }
 

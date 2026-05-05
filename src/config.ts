@@ -1,6 +1,7 @@
 import {
   createDefaultOpenAiValidatorConfig,
 } from "./openai-validator-config.js";
+import { isSecretRef } from "openclaw/plugin-sdk/secret-input-runtime";
 import type { KeepGoingPluginConfig } from "./types.js";
 
 export const CONTINUATION_REACTION_EMOJI = "eyes";
@@ -122,6 +123,10 @@ export function resolveKeepGoingConfig(raw: unknown): KeepGoingPluginConfig {
           typeof validatorLlm.systemPrompt === "string" && validatorLlm.systemPrompt.trim()
             ? validatorLlm.systemPrompt
             : DEFAULT_CONFIG.validator.llm.systemPrompt,
+        apiKeyRef:
+          isSecretRef(validatorLlm.apiKeyRef)
+            ? validatorLlm.apiKeyRef
+            : undefined,
         apiKey:
           typeof validatorLlm.apiKey === "string" && validatorLlm.apiKey.trim()
             ? validatorLlm.apiKey.trim()

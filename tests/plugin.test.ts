@@ -981,6 +981,45 @@ test("debug_logs suppresses step logs when disabled", async () => {
   assert.equal(logs.error.length, 0);
 });
 
+test("disabled plugin does not resolve validator SecretRef during registration", async () => {
+  const { api, logs } = createMockApi({
+    enabled: false,
+    validator: {
+      llm: {
+        apiKeyRef: {
+          source: "env",
+          provider: "local",
+          id: "MISSING_DISABLED_KEEP_GOING_SECRET_REF",
+        },
+      },
+    },
+  });
+
+  registerKeepGoingPlugin(api, {
+    validateContinuationWithLlm: async () => ({
+      continue: false,
+      reason: "already complete",
+      validatorModel: "gpt-5.4-mini",
+    }),
+    launchContinuation: async () => ({ followUpRunId: "follow-up-1" }),
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(
+    logs.warn.some(
+      (entry) => entry.message === "Keep-Going Plugin: validator API key SecretRef could not be resolved",
+    ),
+    false,
+  );
+  assert.equal(
+    logs.warn.some(
+      (entry) => entry.message === "Keep-Going Plugin: validator API key not resolved",
+    ),
+    false,
+  );
+});
+
 test("errors still log with prefix when debug_logs is disabled", async () => {
   const { api, hooks, logs } = createMockApi({ enabled: true, debug_logs: false });
 
