@@ -5,8 +5,12 @@
   "description": "Starts one same-session Slack follow-up run when a validator decides the assistant stopped before finishing actionable work.",
   "activation": {
     "onStartup": true,
-    "onChannels": ["slack"],
-    "onCapabilities": ["hook"]
+    "onChannels": [
+      "slack"
+    ],
+    "onCapabilities": [
+      "hook"
+    ]
   },
   "uiHints": {
     "enabled": {
@@ -94,11 +98,15 @@
       },
       "channels": {
         "type": "array",
-        "default": ["slack"],
+        "default": [
+          "slack"
+        ],
         "description": "Eligible channel ids. This plugin currently supports Slack only.",
         "items": {
           "type": "string",
-          "enum": ["slack"]
+          "enum": [
+            "slack"
+          ]
         }
       },
       "timeoutMs": {
@@ -143,7 +151,9 @@
             "properties": {
               "provider": {
                 "type": "string",
-                "enum": ["openai"],
+                "enum": [
+                  "openai"
+                ],
                 "default": "openai",
                 "description": "Validator provider. Only OpenAI is currently supported."
               },
