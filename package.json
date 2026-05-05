@@ -3,6 +3,7 @@
   "version": "0.3.0",
   "description": "OpenClaw Slack continuation plugin that starts a same-session follow-up run when the validator sees unfinished work",
   "type": "module",
+  "license": "MIT",
   "main": "./dist/index.js",
   "repository": {
     "type": "git",

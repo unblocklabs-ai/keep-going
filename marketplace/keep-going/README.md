@@ -1,3 +1,5 @@
+![Keep Going banner](https://raw.githubusercontent.com/unblocklabs-ai/keep-going/main/docs/keep-going-banner.jpg)
+
 # Keep Going
 
 `keep-going` is a native OpenClaw plugin that watches completed Slack turns and starts one same-session follow-up run when an LLM validator believes the assistant stopped before the task was actually done.
@@ -196,3 +198,7 @@ openclaw plugins update keep-going
 - `src/llm-validator.ts` builds the transcript window and calls the structured validator response
 - `src/session-route.ts` restores Slack routing and auth continuity from session metadata
 - `src/launcher.ts` starts the same-session follow-up run
+
+## License
+
+MIT

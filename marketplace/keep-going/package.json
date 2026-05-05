@@ -20,6 +20,7 @@
     "validator",
     "continuation"
   ],
+  "license": "MIT",
   "openclaw": {
     "extensions": [
       "./dist/index.js"
