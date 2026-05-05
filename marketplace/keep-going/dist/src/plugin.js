@@ -6,13 +6,17 @@ import { launchContinuation, resolveContinuationSessionFile } from "./launcher.j
 import { validateContinuationWithLlm } from "./llm-validator.js";
 import { createKeepGoingLogger } from "./logging.js";
 import { lastAssistantHasSubagentSpawnToolCall } from "./messages.js";
+import { resolveLlmApiKey } from "./openai-api-key.js";
 import { SessionActivityTracker } from "./session-activity.js";
 import { isSubagentSessionKey, resolveSessionRoute } from "./session-route.js";
+import { sendSlackContinuationNotice } from "./slack-notice.js";
 import { addSlackReaction } from "./slack-reaction.js";
+import { SlackReactionError } from "./slack-reaction.js";
 const DEFAULT_DEPS = {
     validateContinuationWithLlm,
     launchContinuation,
     addSlackReaction,
+    sendSlackContinuationNotice,
 };
 function normalizeTimeoutMs(api, configuredTimeoutMs) {
     return api.runtime.agent.resolveAgentTimeoutMs({
@@ -43,6 +47,9 @@ function buildCandidate(event, ctx, config) {
 }
 function logSkip(logger, reason, metadata) {
     logger.step(`skip: ${reason}`, metadata);
+}
+function isSlackMessageTs(value) {
+    return typeof value === "string" && /^\d{10}\.\d{6}$/.test(value);
 }
 function getMessageRole(message) {
     if (!message || typeof message !== "object") {
@@ -249,6 +256,7 @@ async function evaluateDecision(runtime, candidate) {
                 runTranscriptMessages,
                 sessionTranscriptMessages,
             },
+            runtimeConfig: runtime.api.config,
             logger,
         });
         logger.step("validator completed", {
@@ -318,17 +326,45 @@ async function sendContinuationReaction(runtime, context) {
     const { api, config, logger } = runtime;
     const { candidate, route, reactionMessageId } = context;
     if (!config.continuationReaction.enabled) {
-        return;
-    }
-    if (!route.currentChannelId || !reactionMessageId) {
-        logger.error("continuation reaction skipped: missing Slack message route", {
+        logger.step("continuation reaction skipped", {
             runId: candidate.runId,
             sessionKey: candidate.sessionKey,
             threadId: route.threadId,
+            skipReason: "disabled",
+        });
+        return { status: "skipped", reason: "disabled", messageId: reactionMessageId };
+    }
+    if (!route.currentChannelId || !reactionMessageId) {
+        logger.error("continuation reaction skipped", {
+            runId: candidate.runId,
+            sessionKey: candidate.sessionKey,
+            threadId: route.threadId,
+            accountId: route.accountId,
             currentChannelId: route.currentChannelId,
             reactionMessageId,
+            skipReason: "missing-slack-message-route",
         });
-        return;
+        return {
+            status: "skipped",
+            reason: "missing-slack-message-route",
+            messageId: reactionMessageId,
+        };
+    }
+    if (!isSlackMessageTs(reactionMessageId)) {
+        logger.error("continuation reaction skipped", {
+            runId: candidate.runId,
+            sessionKey: candidate.sessionKey,
+            threadId: route.threadId,
+            accountId: route.accountId,
+            channelId: route.currentChannelId,
+            reactionMessageId,
+            skipReason: "assistant-message-id-is-not-slack-ts",
+        });
+        return {
+            status: "skipped",
+            reason: "assistant-message-id-is-not-slack-ts",
+            messageId: reactionMessageId,
+        };
     }
     try {
         await runtime.deps.addSlackReaction(api, {
@@ -341,16 +377,65 @@ async function sendContinuationReaction(runtime, context) {
             runId: candidate.runId,
             sessionKey: candidate.sessionKey,
             threadId: route.threadId,
-            reactionMessageId,
+            accountId: route.accountId,
+            channelId: route.currentChannelId,
+            messageTs: reactionMessageId,
             emoji: CONTINUATION_REACTION_EMOJI,
         });
+        return { status: "sent", messageTs: reactionMessageId };
     }
     catch (error) {
+        const slackDetails = error instanceof SlackReactionError ? error.details : {};
         logger.error("continuation reaction failed", {
             runId: candidate.runId,
             sessionKey: candidate.sessionKey,
             threadId: route.threadId,
-            reactionMessageId,
+            accountId: route.accountId,
+            channelId: route.currentChannelId,
+            messageTs: reactionMessageId,
+            status: slackDetails.status,
+            slackError: slackDetails.slackError,
+            error: error instanceof Error ? error.message : String(error),
+        });
+        return {
+            status: "failed",
+            reason: "slack-reaction-api-failed",
+            messageTs: reactionMessageId,
+            error,
+        };
+    }
+}
+async function sendContinuationNoticeIfNeeded(runtime, context, reactionResult) {
+    const { api, config, logger, deps } = runtime;
+    const { candidate, route } = context;
+    const shouldSend = config.continuationNotice.mode === "always" ||
+        (config.continuationNotice.mode === "fallbackOnly" && reactionResult.status !== "sent");
+    if (!shouldSend) {
+        return;
+    }
+    try {
+        await deps.sendSlackContinuationNotice(api, {
+            route,
+            text: config.continuationNotice.text,
+        });
+        logger.step("sent continuation notice", {
+            runId: candidate.runId,
+            sessionKey: candidate.sessionKey,
+            threadId: route.threadId,
+            accountId: route.accountId,
+            noticeReason: reactionResult.status === "sent"
+                ? "mode-always"
+                : `reaction-${reactionResult.reason}`,
+        });
+    }
+    catch (error) {
+        logger.error("continuation notice failed", {
+            runId: candidate.runId,
+            sessionKey: candidate.sessionKey,
+            threadId: route.threadId,
+            accountId: route.accountId,
+            reactionStatus: reactionResult.status,
+            reactionReason: reactionResult.status === "sent" ? undefined : reactionResult.reason,
             error: error instanceof Error ? error.message : String(error),
         });
     }
@@ -384,7 +469,8 @@ async function launchEligibleContinuation(runtime, context, evaluated) {
             reason: decision.reason,
             ...(validatorModel ? { validatorModel } : {}),
         });
-        await sendContinuationReaction(runtime, context);
+        const reactionResult = await sendContinuationReaction(runtime, context);
+        await sendContinuationNoticeIfNeeded(runtime, context, reactionResult);
         const launchResult = await deps.launchContinuation(api, {
             candidate,
             decision,
@@ -432,6 +518,14 @@ export function registerKeepGoingPlugin(api, deps = {}) {
         timeoutMs: config.timeoutMs,
         validatorModel: config.validator.llm.model,
     });
+    if (!resolveLlmApiKey(config.validator.llm, api.config)) {
+        runtime.logger.warn("validator API key not resolved", {
+            validatorModel: config.validator.llm.model,
+            apiKeyEnv: config.validator.llm.apiKeyEnv,
+            fallbackEnv: "OPENAI_API_KEY",
+            hasInlineApiKey: Boolean(config.validator.llm.apiKey),
+        });
+    }
     api.runtime.events.onSessionTranscriptUpdate((update) => {
         runtime.sessionActivity.recordTranscriptUpdate(update);
         runtime.logger.step("recorded session transcript update", {

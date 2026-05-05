@@ -69,6 +69,10 @@ The plugin exposes a small config surface through `openclaw.plugin.json`:
   "continuationReaction": {
     "enabled": true
   },
+  "continuationNotice": {
+    "mode": "fallbackOnly",
+    "text": ":eyes: continuing..."
+  },
   "validator": {
     "llm": {
       "model": "gpt-5.4-mini",
@@ -89,10 +93,11 @@ Notes:
 
 - `enabled` defaults to `true`
 - `channels` defaults to `["slack"]`; other channels are ignored
-- `continuationReaction.enabled` defaults to `true`; when enabled, the plugin adds an `eyes` reaction to the assistant Slack message only after the validator approves a continuation
+- `continuationReaction.enabled` defaults to `true`; when enabled, the plugin adds an `eyes` reaction to the assistant Slack message only after the validator approves a continuation and the assistant message id is a Slack timestamp
+- `continuationNotice.mode` defaults to `fallbackOnly`; if the reaction is skipped or fails, the plugin posts `:eyes: continuing...` in the Slack thread so users can see the continuation fired
 - `validator.llm.model` defaults to `gpt-5.4-mini`
 - `validator.llm.apiKeyEnv` defaults to `KEEP_GOING_OPENAI_API_KEY`, which overrides the shared `OPENAI_API_KEY` when set
-- `OPENAI_API_KEY` is used as the fallback validator credential so normal OpenClaw OpenAI config works without extra plugin setup
+- `OPENAI_API_KEY` is used as the fallback validator credential from OpenClaw config env or process env so normal OpenClaw OpenAI config works without extra plugin setup
 - `validator.llm.apiKey` is supported as the highest-priority inline override, but usually not desirable
 - `includeCurrentTurnOnly` keeps the validator focused on the current task while still allowing a small amount of recent context
 - `debug_logs: true` enables structured step-by-step plugin logging; when `false`, only error logs are emitted
@@ -107,7 +112,7 @@ The plugin includes a few guards to avoid bad continuations:
 - continuation launch is aborted if newer session activity appears during validation
 - model, provider, auth profile, and Slack routing are reused from the existing session route
 
-The validator is called directly against OpenAI and does not create its own OpenClaw run. When reaction posting is enabled, the wake marker is a Slack reaction rather than an extra thread message.
+The validator is called directly against OpenAI and does not create its own OpenClaw run. When reaction posting is enabled, the wake marker is a Slack reaction. If the reaction target cannot be confirmed as a Slack message timestamp or Slack rejects the reaction, Keep Going falls back to a short in-thread continuation notice.
 
 ## Development
 

@@ -5,6 +5,7 @@ const LOG_PREFIX = "Keep-Going Plugin: ";
 export type KeepGoingLogger = {
   debugEnabled: boolean;
   step: (message: string, meta?: Record<string, unknown>) => void;
+  warn: (message: string, meta?: Record<string, unknown>) => void;
   error: (message: string, meta?: Record<string, unknown>) => void;
 };
 
@@ -73,6 +74,9 @@ export function createKeepGoingLogger(
         return;
       }
       logger.info(prefixMessage(message), sanitizeLogMetadata(meta));
+    },
+    warn(message, meta) {
+      logger.warn?.(prefixMessage(message), sanitizeLogMetadata(meta));
     },
     error(message, meta) {
       logger.error(prefixMessage(message), sanitizeLogMetadata(meta));

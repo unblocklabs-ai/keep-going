@@ -376,7 +376,7 @@ test("plugin-triggered continuation flow dispatches assistant replies to the sto
   emitTranscriptUpdate({
     sessionFile: SESSION_FILE,
     sessionKey: SESSION_KEY,
-    messageId: "assistant-msg-1",
+    messageId: "1776309281.000200",
     message: {
       role: "assistant",
       content: [{ type: "output_text", text: "I should continue." }],
@@ -405,7 +405,7 @@ test("plugin-triggered continuation flow dispatches assistant replies to the sto
   assert.equal(reactions.length, 1);
   assert.deepEqual(reactions[0], {
     channelId: "C123",
-    messageId: "assistant-msg-1",
+    messageId: "1776309281.000200",
     emoji: "eyes",
     accountId: "default",
   });
@@ -446,7 +446,7 @@ test("continuation reaction is added only when validator approves continuation",
   emitTranscriptUpdate({
     sessionFile: SESSION_FILE,
     sessionKey: SESSION_KEY,
-    messageId: "assistant-msg-1",
+    messageId: "1776309281.000200",
     message: {
       role: "assistant",
       content: [{ type: "output_text", text: "I should continue." }],
@@ -464,10 +464,139 @@ test("continuation reaction is added only when validator approves continuation",
   assert.equal(reactions.length, 1);
   assert.deepEqual(reactions[0], {
     channelId: "C123",
-    messageId: "assistant-msg-1",
+    messageId: "1776309281.000200",
     emoji: "eyes",
     accountId: "default",
   });
+});
+
+test("continuation reaction skips transcript-local assistant ids and posts fallback notice", async () => {
+  const reactions: Array<Record<string, unknown>> = [];
+  const notices: Array<Record<string, unknown>> = [];
+  const { api, hooks, logs, emitTranscriptUpdate } = createMockApi(
+    { enabled: true },
+    {
+      loadOutboundAdapter: async (channelId) => {
+        assert.equal(channelId, "slack");
+        return {
+          sendPayload: async (ctx: Record<string, unknown>) => {
+            notices.push(ctx);
+          },
+        };
+      },
+    },
+  );
+  const launchCalls: LaunchContinuationParams[] = [];
+
+  registerKeepGoingPlugin(api, {
+    validateContinuationWithLlm: async () => ({
+      continue: true,
+      reason: "unfinished work remains",
+      validatorModel: "gpt-5.4-mini",
+    }),
+    launchContinuation: async (_api, params) => {
+      launchCalls.push(params);
+      return { followUpRunId: "follow-up-1" };
+    },
+    addSlackReaction: async (_api, params) => {
+      reactions.push(params);
+    },
+  });
+
+  const beforeModelResolve = hooks.get("before_model_resolve");
+  const agentEnd = hooks.get("agent_end");
+  const runContext = createRunContext();
+
+  await beforeModelResolve?.({ prompt: "Please continue the task." }, runContext);
+  emitTranscriptUpdate({
+    sessionFile: SESSION_FILE,
+    sessionKey: SESSION_KEY,
+    messageId: "assistant-msg-1",
+    message: {
+      role: "assistant",
+      content: [{ type: "output_text", text: "I should continue." }],
+    },
+  });
+  await agentEnd?.(
+    {
+      success: true,
+      messages: [],
+    },
+    runContext,
+  );
+
+  assert.equal(launchCalls.length, 1);
+  assert.equal(reactions.length, 0);
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0]?.to, "channel:C123");
+  assert.equal(notices[0]?.threadId, "1712345678.000100");
+  assert.deepEqual(notices[0]?.payload, { text: ":eyes: continuing..." });
+  const skipLog = logs.error.find(
+    (entry) => entry.message === "Keep-Going Plugin: continuation reaction skipped",
+  );
+  assert.ok(skipLog);
+  assert.equal(skipLog.meta?.skipReason, "assistant-message-id-is-not-slack-ts");
+  assert.equal(skipLog.meta?.reactionMessageId, "assistant-msg-1");
+});
+
+test("dedupe prevents duplicate reaction notice and continuation for the same run", async () => {
+  const notices: Array<Record<string, unknown>> = [];
+  const { api, hooks, emitTranscriptUpdate } = createMockApi(
+    { enabled: true },
+    {
+      loadOutboundAdapter: async () => ({
+        sendPayload: async (ctx: Record<string, unknown>) => {
+          notices.push(ctx);
+        },
+      }),
+    },
+  );
+  const launchCalls: LaunchContinuationParams[] = [];
+  let validatorCalls = 0;
+
+  registerKeepGoingPlugin(api, {
+    validateContinuationWithLlm: async () => {
+      validatorCalls += 1;
+      return {
+        continue: true,
+        reason: "unfinished work remains",
+        validatorModel: "gpt-5.4-mini",
+      };
+    },
+    launchContinuation: async (_api, params) => {
+      launchCalls.push(params);
+      return { followUpRunId: "follow-up-1" };
+    },
+    addSlackReaction: async () => {
+      throw new Error("reaction should not be called for transcript-local id");
+    },
+  });
+
+  const beforeModelResolve = hooks.get("before_model_resolve");
+  const agentEnd = hooks.get("agent_end");
+  const runContext = createRunContext();
+
+  await beforeModelResolve?.({ prompt: "Please continue the task." }, runContext);
+  emitTranscriptUpdate({
+    sessionFile: SESSION_FILE,
+    sessionKey: SESSION_KEY,
+    messageId: "assistant-msg-1",
+    message: {
+      role: "assistant",
+      content: [{ type: "output_text", text: "I should continue." }],
+    },
+  });
+
+  const endEvent = {
+    success: true,
+    messages: [],
+  };
+  await agentEnd?.(endEvent, runContext);
+  await agentEnd?.(endEvent, runContext);
+
+  assert.equal(validatorCalls, 1);
+  assert.equal(launchCalls.length, 1);
+  assert.equal(notices.length, 1);
 });
 
 test("continuation reaction is not added when disabled", async () => {
@@ -570,10 +699,23 @@ test("continuation reaction is not added when validator declines continuation", 
 });
 
 test("continuation reaction failure does not block continuation launch", async () => {
-  const { api, hooks, logs, emitTranscriptUpdate } = createMockApi({
-    enabled: true,
-    debug_logs: false,
-  });
+  const notices: Array<Record<string, unknown>> = [];
+  const { api, hooks, logs, emitTranscriptUpdate } = createMockApi(
+    {
+      enabled: true,
+      debug_logs: false,
+    },
+    {
+      loadOutboundAdapter: async (channelId) => {
+        assert.equal(channelId, "slack");
+        return {
+          sendPayload: async (ctx: Record<string, unknown>) => {
+            notices.push(ctx);
+          },
+        };
+      },
+    },
+  );
   const launchCalls: LaunchContinuationParams[] = [];
 
   registerKeepGoingPlugin(api, {
@@ -599,7 +741,7 @@ test("continuation reaction failure does not block continuation launch", async (
   emitTranscriptUpdate({
     sessionFile: SESSION_FILE,
     sessionKey: SESSION_KEY,
-    messageId: "assistant-msg-1",
+    messageId: "1776309281.000200",
     message: {
       role: "assistant",
       content: [{ type: "output_text", text: "I should continue." }],
@@ -617,6 +759,9 @@ test("continuation reaction failure does not block continuation launch", async (
   assert.equal(logs.error.length, 1);
   assert.equal(logs.error[0]?.message, "Keep-Going Plugin: continuation reaction failed");
   assert.equal(logs.error[0]?.meta?.error, "slack unavailable");
+  assert.equal(logs.error[0]?.meta?.messageTs, "1776309281.000200");
+  assert.equal(notices.length, 1);
+  assert.deepEqual(notices[0]?.payload, { text: ":eyes: continuing..." });
 });
 
 test("validator-approved continuation is not blocked when the same run is re-observed during cleanup", async () => {

@@ -221,6 +221,71 @@ test("validator API key resolution prefers inline override", () => {
   }
 });
 
+test("validator API key resolution uses OpenClaw config env before process env", () => {
+  const previousOpenAi = process.env.OPENAI_API_KEY;
+  const previousKeepGoing = process.env.KEEP_GOING_OPENAI_API_KEY;
+  try {
+    process.env.OPENAI_API_KEY = "process-shared-openai-key";
+    process.env.KEEP_GOING_OPENAI_API_KEY = "process-plugin-openai-key";
+
+    assert.equal(
+      resolveLlmApiKey(createDefaultOpenAiValidatorConfig(), {
+        env: {
+          vars: {
+            KEEP_GOING_OPENAI_API_KEY: "config-plugin-openai-key",
+            OPENAI_API_KEY: "config-shared-openai-key",
+          },
+        },
+      }),
+      "config-plugin-openai-key",
+    );
+  } finally {
+    if (previousOpenAi === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = previousOpenAi;
+    }
+    if (previousKeepGoing === undefined) {
+      delete process.env.KEEP_GOING_OPENAI_API_KEY;
+    } else {
+      process.env.KEEP_GOING_OPENAI_API_KEY = previousKeepGoing;
+    }
+  }
+});
+
+test("validator API key resolution falls back to resolved OpenClaw provider key", () => {
+  const previousOpenAi = process.env.OPENAI_API_KEY;
+  const previousKeepGoing = process.env.KEEP_GOING_OPENAI_API_KEY;
+  try {
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.KEEP_GOING_OPENAI_API_KEY;
+
+    assert.equal(
+      resolveLlmApiKey(createDefaultOpenAiValidatorConfig(), {
+        models: {
+          providers: {
+            openai: {
+              apiKey: "resolved-provider-openai-key",
+            },
+          },
+        },
+      }),
+      "resolved-provider-openai-key",
+    );
+  } finally {
+    if (previousOpenAi === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = previousOpenAi;
+    }
+    if (previousKeepGoing === undefined) {
+      delete process.env.KEEP_GOING_OPENAI_API_KEY;
+    } else {
+      process.env.KEEP_GOING_OPENAI_API_KEY = previousKeepGoing;
+    }
+  }
+});
+
 test("continuation reaction config defaults enabled", () => {
   assert.deepEqual(resolveKeepGoingConfig({}).continuationReaction, {
     enabled: true,
@@ -266,6 +331,28 @@ test("continuation reaction config overrides legacy user-facing notice config", 
     }).continuationReaction,
     {
       enabled: true,
+    },
+  );
+});
+
+test("continuation notice config defaults to fallback only", () => {
+  assert.deepEqual(resolveKeepGoingConfig({}).continuationNotice, {
+    mode: "fallbackOnly",
+    text: ":eyes: continuing...",
+  });
+});
+
+test("continuation notice config supports off and custom text", () => {
+  assert.deepEqual(
+    resolveKeepGoingConfig({
+      continuationNotice: {
+        mode: "off",
+        text: "Continuing.",
+      },
+    }).continuationNotice,
+    {
+      mode: "off",
+      text: "Continuing.",
     },
   );
 });

@@ -28,6 +28,7 @@ type LlmValidatorInput = {
   config: KeepGoingLlmValidatorConfig;
   context?: ContinuationValidationContext;
   logger?: KeepGoingLogger;
+  runtimeConfig?: Parameters<typeof resolveLlmApiKey>[1];
 };
 
 type LlmValidatorOutput = ContinuationDecision & { validatorModel: string };
@@ -252,7 +253,7 @@ function normalizeDecision(
 export async function validateContinuationWithLlm(
   input: LlmValidatorInput,
 ): Promise<LlmValidatorOutput> {
-  const apiKey = resolveLlmApiKey(input.config);
+  const apiKey = resolveLlmApiKey(input.config, input.runtimeConfig);
   if (!apiKey) {
     const configuredEnv = input.config.apiKeyEnv?.trim();
     const envHint = configuredEnv && configuredEnv !== "OPENAI_API_KEY"

@@ -1,6 +1,14 @@
 import { normalizeResolvedSecretInputString } from "openclaw/plugin-sdk/secret-input-runtime";
 const DEFAULT_ACCOUNT_ID = "default";
 const DEFAULT_SLACK_REACTION_TIMEOUT_MS = 3000;
+export class SlackReactionError extends Error {
+    details;
+    constructor(message, details = {}) {
+        super(message);
+        this.details = details;
+        this.name = "SlackReactionError";
+    }
+}
 export async function addSlackReaction(api, params, options = {}) {
     const token = resolveSlackBotToken(api, params.accountId);
     const fetchImpl = options.fetchImpl ?? fetch;
@@ -21,23 +29,40 @@ export async function addSlackReaction(api, params, options = {}) {
             }),
             signal: controller.signal,
         });
+        const result = await readSlackJson(response);
         if (!response.ok) {
-            throw new Error(`Slack reaction request failed with HTTP ${response.status}`);
+            throw new SlackReactionError(`Slack reaction request failed with HTTP ${response.status}`, {
+                status: response.status,
+                slackError: formatSlackError(result?.error),
+            });
         }
-        const result = await response.json();
         if (result.ok === true || result.error === "already_reacted") {
             return;
         }
-        throw new Error(`Slack reaction request failed: ${formatSlackError(result.error)}`);
+        const slackError = formatSlackError(result.error);
+        throw new SlackReactionError(`Slack reaction request failed: ${slackError}`, {
+            slackError,
+        });
     }
     catch (error) {
         if (controller.signal.aborted) {
-            throw new Error(`Slack reaction request timed out after ${timeoutMs}ms`);
+            throw new SlackReactionError(`Slack reaction request timed out after ${timeoutMs}ms`);
         }
         throw error;
     }
     finally {
         clearTimeout(timeout);
+    }
+}
+async function readSlackJson(response) {
+    try {
+        const result = await response.json();
+        return result && typeof result === "object" && !Array.isArray(result)
+            ? result
+            : {};
+    }
+    catch {
+        return {};
     }
 }
 function resolveSlackBotToken(api, accountId) {

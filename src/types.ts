@@ -28,6 +28,10 @@ export type KeepGoingPluginConfig = {
   continuationReaction: {
     enabled: boolean;
   };
+  continuationNotice: {
+    mode: "off" | "fallbackOnly" | "always";
+    text: string;
+  };
   validator: {
     llm: KeepGoingLlmValidatorConfig;
   };

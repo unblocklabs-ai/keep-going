@@ -13,10 +13,25 @@ type SlackReactionOptions = {
   timeoutMs?: number;
 };
 
+export type SlackReactionErrorDetails = {
+  status?: number;
+  slackError?: string;
+};
+
 type RecordLike = Record<string, unknown>;
 
 const DEFAULT_ACCOUNT_ID = "default";
 const DEFAULT_SLACK_REACTION_TIMEOUT_MS = 3000;
+
+export class SlackReactionError extends Error {
+  constructor(
+    message: string,
+    readonly details: SlackReactionErrorDetails = {},
+  ) {
+    super(message);
+    this.name = "SlackReactionError";
+  }
+}
 
 export async function addSlackReaction(
   api: OpenClawPluginApi,
@@ -43,22 +58,44 @@ export async function addSlackReaction(
       }),
       signal: controller.signal,
     });
+    const result = await readSlackJson(response);
     if (!response.ok) {
-      throw new Error(`Slack reaction request failed with HTTP ${response.status}`);
+      throw new SlackReactionError(
+        `Slack reaction request failed with HTTP ${response.status}`,
+        {
+          status: response.status,
+          slackError: formatSlackError(result?.error),
+        },
+      );
     }
 
-    const result = await response.json() as { ok?: unknown; error?: unknown };
     if (result.ok === true || result.error === "already_reacted") {
       return;
     }
-    throw new Error(`Slack reaction request failed: ${formatSlackError(result.error)}`);
+    const slackError = formatSlackError(result.error);
+    throw new SlackReactionError(`Slack reaction request failed: ${slackError}`, {
+      slackError,
+    });
   } catch (error) {
     if (controller.signal.aborted) {
-      throw new Error(`Slack reaction request timed out after ${timeoutMs}ms`);
+      throw new SlackReactionError(`Slack reaction request timed out after ${timeoutMs}ms`);
     }
     throw error;
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+async function readSlackJson(
+  response: Response,
+): Promise<{ ok?: unknown; error?: unknown }> {
+  try {
+    const result = await response.json();
+    return result && typeof result === "object" && !Array.isArray(result)
+      ? (result as { ok?: unknown; error?: unknown })
+      : {};
+  } catch {
+    return {};
   }
 }
 

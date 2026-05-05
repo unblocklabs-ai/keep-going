@@ -55,6 +55,9 @@ export function createKeepGoingLogger(logger, debugEnabled) {
             }
             logger.info(prefixMessage(message), sanitizeLogMetadata(meta));
         },
+        warn(message, meta) {
+            logger.warn?.(prefixMessage(message), sanitizeLogMetadata(meta));
+        },
         error(message, meta) {
             logger.error(prefixMessage(message), sanitizeLogMetadata(meta));
         },

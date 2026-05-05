@@ -35,6 +35,17 @@
       "label": "Continuation Reaction",
       "help": "Add an eyes reaction to the assistant Slack message when Keep Going wakes the agent."
     },
+    "continuationNotice.mode": {
+      "label": "Continuation Notice",
+      "help": "Post a short Slack thread reply when the reaction cannot be added.",
+      "advanced": true
+    },
+    "continuationNotice.text": {
+      "label": "Continuation Notice Text",
+      "placeholder": ":eyes: continuing...",
+      "help": "Slack thread reply text used when continuation notices are enabled.",
+      "advanced": true
+    },
     "validator.llm.model": {
       "label": "Validator Model",
       "placeholder": "gpt-5.4-mini",
@@ -126,10 +137,32 @@
           }
         }
       },
+      "continuationNotice": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Optional Slack thread reply used as a human-visible continuation breadcrumb.",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "off",
+              "fallbackOnly",
+              "always"
+            ],
+            "default": "fallbackOnly",
+            "description": "When to post the Slack continuation notice. fallbackOnly posts only when the reaction is skipped or fails."
+          },
+          "text": {
+            "type": "string",
+            "default": ":eyes: continuing...",
+            "description": "Slack thread reply text for the continuation notice."
+          }
+        }
+      },
       "userFacingNotice": {
         "type": "object",
         "additionalProperties": false,
-        "description": "Deprecated compatibility config. Slack notice messages are no longer posted; use continuationReaction.enabled instead.",
+        "description": "Deprecated compatibility config. Use continuationReaction and continuationNotice instead.",
         "properties": {
           "enabled": {
             "type": "boolean",

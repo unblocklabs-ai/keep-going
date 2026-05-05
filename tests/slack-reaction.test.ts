@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
-import { addSlackReaction } from "../src/slack-reaction.js";
+import { addSlackReaction, SlackReactionError } from "../src/slack-reaction.js";
 
 type FetchCall = {
   url: string | URL | Request;
@@ -159,7 +159,12 @@ test("addSlackReaction throws for Slack API errors", async () => {
         fetchImpl: createFetch(Response.json({ ok: false, error: "missing_scope" })),
       },
     ),
-    /Slack reaction request failed: missing_scope/,
+    (error) => {
+      assert.ok(error instanceof SlackReactionError);
+      assert.equal(error.message, "Slack reaction request failed: missing_scope");
+      assert.equal(error.details.slackError, "missing_scope");
+      return true;
+    },
   );
 });
 
@@ -182,7 +187,13 @@ test("addSlackReaction throws for non-2xx HTTP responses", async () => {
         fetchImpl: createFetch(new Response("gateway unavailable", { status: 503 })),
       },
     ),
-    /Slack reaction request failed with HTTP 503/,
+    (error) => {
+      assert.ok(error instanceof SlackReactionError);
+      assert.equal(error.message, "Slack reaction request failed with HTTP 503");
+      assert.equal(error.details.status, 503);
+      assert.equal(error.details.slackError, "unknown_error");
+      return true;
+    },
   );
 });
 

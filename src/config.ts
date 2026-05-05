@@ -4,6 +4,7 @@ import {
 import type { KeepGoingPluginConfig } from "./types.js";
 
 export const CONTINUATION_REACTION_EMOJI = "eyes";
+export const DEFAULT_CONTINUATION_NOTICE_TEXT = ":eyes: continuing...";
 
 const DEFAULT_CONFIG: KeepGoingPluginConfig = {
   enabled: true,
@@ -11,6 +12,10 @@ const DEFAULT_CONFIG: KeepGoingPluginConfig = {
   channels: ["slack"],
   continuationReaction: {
     enabled: true,
+  },
+  continuationNotice: {
+    mode: "fallbackOnly",
+    text: DEFAULT_CONTINUATION_NOTICE_TEXT,
   },
   validator: {
     llm: createDefaultOpenAiValidatorConfig(),
@@ -42,6 +47,22 @@ function normalizeBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
+function normalizeNoticeMode(
+  value: unknown,
+  fallback: KeepGoingPluginConfig["continuationNotice"]["mode"],
+): KeepGoingPluginConfig["continuationNotice"]["mode"] {
+  if (value === "off" || value === "fallbackOnly" || value === "always") {
+    return value;
+  }
+  if (value === false) {
+    return "off";
+  }
+  if (value === true) {
+    return "always";
+  }
+  return fallback;
+}
+
 export function resolveKeepGoingConfig(raw: unknown): KeepGoingPluginConfig {
   const config = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const validator =
@@ -60,6 +81,10 @@ export function resolveKeepGoingConfig(raw: unknown): KeepGoingPluginConfig {
     config.userFacingNotice && typeof config.userFacingNotice === "object"
       ? (config.userFacingNotice as Record<string, unknown>)
       : {};
+  const continuationNotice =
+    config.continuationNotice && typeof config.continuationNotice === "object"
+      ? (config.continuationNotice as Record<string, unknown>)
+      : {};
   const channels = normalizeStringArray(config.channels);
   const reactionEnabledFallback = normalizeBoolean(
     legacyUserFacingNotice.enabled,
@@ -76,6 +101,16 @@ export function resolveKeepGoingConfig(raw: unknown): KeepGoingPluginConfig {
         continuationReaction.enabled,
         reactionEnabledFallback,
       ),
+    },
+    continuationNotice: {
+      mode: normalizeNoticeMode(
+        continuationNotice.mode ?? continuationNotice.enabled,
+        DEFAULT_CONFIG.continuationNotice.mode,
+      ),
+      text:
+        typeof continuationNotice.text === "string" && continuationNotice.text.trim()
+          ? continuationNotice.text.trim()
+          : DEFAULT_CONFIG.continuationNotice.text,
     },
     validator: {
       llm: createDefaultOpenAiValidatorConfig({

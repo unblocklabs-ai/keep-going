@@ -173,7 +173,7 @@ function normalizeDecision(parsed, fallbackModel) {
     };
 }
 export async function validateContinuationWithLlm(input) {
-    const apiKey = resolveLlmApiKey(input.config);
+    const apiKey = resolveLlmApiKey(input.config, input.runtimeConfig);
     if (!apiKey) {
         const configuredEnv = input.config.apiKeyEnv?.trim();
         const envHint = configuredEnv && configuredEnv !== "OPENAI_API_KEY"
