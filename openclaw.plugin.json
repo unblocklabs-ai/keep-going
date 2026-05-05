@@ -1,7 +1,7 @@
 {
   "id": "keep-going",
   "name": "Keep Going",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Starts one same-session Slack follow-up run when a validator decides the assistant stopped before finishing actionable work.",
   "activation": {
     "onStartup": true,
