@@ -1,6 +1,6 @@
 {
   "name": "@unblocklabs/openclaw-keep-going",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "OpenClaw Slack continuation plugin that starts a same-session follow-up run when the validator sees unfinished work",
   "type": "module",
   "main": "./dist/index.js",
