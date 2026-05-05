@@ -1,0 +1,32 @@
+name: Check
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run preflight
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: plugin-inspector-reports
+          path: reports/plugin-inspector-*
+          if-no-files-found: ignore

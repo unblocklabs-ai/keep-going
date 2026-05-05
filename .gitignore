@@ -1,7 +1,9 @@
 node_modules/
 coverage/
 *.log
+*.tgz
 .DS_Store
 .env
 .env.local
+reports/plugin-inspector-*
 sample_data/
