@@ -1,0 +1,143 @@
+import { normalizeString } from "./normalize.js";
+const OPENAI_RESPONSES_API_URL = "https://api.openai.com/v1/responses";
+function clipText(value, maxChars) {
+    if (value.length <= maxChars) {
+        return value;
+    }
+    return value.slice(0, Math.max(0, maxChars - 1)).trimEnd() + "…";
+}
+function extractOutputText(responseBody) {
+    if (!responseBody || typeof responseBody !== "object") {
+        return undefined;
+    }
+    const body = responseBody;
+    const topLevelText = normalizeString(body.output_text);
+    if (topLevelText) {
+        return topLevelText;
+    }
+    const output = Array.isArray(body.output) ? body.output : [];
+    const blocks = [];
+    for (const item of output) {
+        const content = Array.isArray(item?.content) ? item.content : [];
+        for (const block of content) {
+            const text = normalizeString(block?.text) ?? normalizeString(block?.refusal);
+            if (text) {
+                blocks.push(text);
+            }
+        }
+    }
+    const combined = blocks.join("\n").trim();
+    return combined || undefined;
+}
+function extractRefusalText(responseBody) {
+    if (!responseBody || typeof responseBody !== "object") {
+        return undefined;
+    }
+    const body = responseBody;
+    const output = Array.isArray(body.output) ? body.output : [];
+    const refusals = [];
+    for (const item of output) {
+        const content = Array.isArray(item?.content) ? item.content : [];
+        for (const block of content) {
+            if (block?.type === "refusal") {
+                const refusal = normalizeString(block.refusal);
+                if (refusal) {
+                    refusals.push(refusal);
+                }
+            }
+        }
+    }
+    const combined = refusals.join("\n").trim();
+    return combined || undefined;
+}
+export async function callResponsesJsonSchema(request, apiKey) {
+    const controller = new AbortController();
+    const timeoutMs = request.config.timeoutMs ?? 15_000;
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const startedAt = Date.now();
+    let failureLogged = false;
+    request.logger?.step("starting OpenAI validator request", {
+        model: request.config.model,
+        schemaName: request.schemaName,
+        timeoutMs,
+        maxOutputTokens: request.maxOutputTokens ?? 400,
+    });
+    try {
+        const response = await fetch(OPENAI_RESPONSES_API_URL, {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${apiKey}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+                model: request.config.model,
+                store: false,
+                temperature: request.config.temperature ?? 0,
+                max_output_tokens: request.maxOutputTokens ?? 400,
+                input: [
+                    {
+                        role: "system",
+                        content: [{ type: "input_text", text: request.systemPrompt }],
+                    },
+                    {
+                        role: "user",
+                        content: [{ type: "input_text", text: request.userPrompt }],
+                    },
+                ],
+                text: {
+                    format: {
+                        type: "json_schema",
+                        name: request.schemaName,
+                        strict: true,
+                        schema: request.schema,
+                    },
+                },
+            }),
+            signal: controller.signal,
+        });
+        if (!response.ok) {
+            const responseText = clipText(await response.text(), 1000);
+            request.logger?.error("OpenAI validator request failed", {
+                model: request.config.model,
+                schemaName: request.schemaName,
+                timeoutMs,
+                durationMs: Date.now() - startedAt,
+                status: response.status,
+                statusText: response.statusText,
+                responseText,
+            });
+            failureLogged = true;
+            throw new Error(`request failed with ${response.status} ${response.statusText}: ${responseText}`);
+        }
+        const responseBody = await response.json();
+        const result = {
+            outputText: extractOutputText(responseBody),
+            refusal: extractRefusalText(responseBody),
+        };
+        request.logger?.step("OpenAI validator response received", {
+            model: request.config.model,
+            schemaName: request.schemaName,
+            timeoutMs,
+            durationMs: Date.now() - startedAt,
+            status: response.status,
+            hasOutputText: Boolean(result.outputText),
+            hasRefusal: Boolean(result.refusal),
+        });
+        return result;
+    }
+    catch (error) {
+        if (!failureLogged) {
+            request.logger?.error("OpenAI validator request threw", {
+                model: request.config.model,
+                schemaName: request.schemaName,
+                timeoutMs,
+                durationMs: Date.now() - startedAt,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+        throw error;
+    }
+    finally {
+        clearTimeout(timeout);
+    }
+}

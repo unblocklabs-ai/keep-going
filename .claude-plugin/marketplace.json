@@ -6,7 +6,7 @@
       "name": "keep-going",
       "version": "0.3.0",
       "description": "Starts one same-session Slack follow-up run when a validator sees unfinished work",
-      "source": "."
+      "source": "marketplace/keep-going"
     }
   ]
 }

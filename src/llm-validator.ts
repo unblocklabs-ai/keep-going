@@ -182,9 +182,7 @@ function renderTranscriptWindow(
 export function buildValidatorPrompt(input: LlmValidatorInput): string {
   const runTranscriptMessages = input.context?.runTranscriptMessages ?? [];
   const sessionTranscriptMessages = input.context?.sessionTranscriptMessages ?? [];
-  const candidateTranscriptMessages = normalizeTranscriptMessages(input.candidate.messages, {
-    ignoredTexts: input.candidate.ignoredTranscriptTexts,
-  });
+  const candidateTranscriptMessages = normalizeTranscriptMessages(input.candidate.messages);
   const transcriptSource =
     sessionTranscriptMessages.length > 0
       ? sessionTranscriptMessages

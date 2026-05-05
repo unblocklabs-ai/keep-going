@@ -3,15 +3,14 @@ import {
 } from "./openai-validator-config.js";
 import type { KeepGoingPluginConfig } from "./types.js";
 
-export const DEFAULT_USER_FACING_NOTICE_TEXT = "🦞 Keep going!";
+export const CONTINUATION_REACTION_EMOJI = "eyes";
 
 const DEFAULT_CONFIG: KeepGoingPluginConfig = {
   enabled: true,
   debug_logs: false,
   channels: ["slack"],
-  userFacingNotice: {
+  continuationReaction: {
     enabled: true,
-    text: DEFAULT_USER_FACING_NOTICE_TEXT,
   },
   validator: {
     llm: createDefaultOpenAiValidatorConfig(),
@@ -53,27 +52,30 @@ export function resolveKeepGoingConfig(raw: unknown): KeepGoingPluginConfig {
     validator.llm && typeof validator.llm === "object"
       ? (validator.llm as Record<string, unknown>)
       : {};
-  const userFacingNotice =
+  const continuationReaction =
+    config.continuationReaction && typeof config.continuationReaction === "object"
+      ? (config.continuationReaction as Record<string, unknown>)
+      : {};
+  const legacyUserFacingNotice =
     config.userFacingNotice && typeof config.userFacingNotice === "object"
       ? (config.userFacingNotice as Record<string, unknown>)
       : {};
   const channels = normalizeStringArray(config.channels);
-  const noticeText =
-    typeof userFacingNotice.text === "string" && userFacingNotice.text.trim()
-      ? userFacingNotice.text.trim()
-      : DEFAULT_CONFIG.userFacingNotice.text;
+  const reactionEnabledFallback = normalizeBoolean(
+    legacyUserFacingNotice.enabled,
+    DEFAULT_CONFIG.continuationReaction.enabled,
+  );
 
   return {
     enabled: config.enabled !== false,
     debug_logs: normalizeBoolean(config.debug_logs, DEFAULT_CONFIG.debug_logs),
     channels: channels.length > 0 ? channels : DEFAULT_CONFIG.channels,
     timeoutMs: normalizePositiveInteger(config.timeoutMs),
-    userFacingNotice: {
+    continuationReaction: {
       enabled: normalizeBoolean(
-        userFacingNotice.enabled,
-        DEFAULT_CONFIG.userFacingNotice.enabled,
+        continuationReaction.enabled,
+        reactionEnabledFallback,
       ),
-      text: noticeText,
     },
     validator: {
       llm: createDefaultOpenAiValidatorConfig({

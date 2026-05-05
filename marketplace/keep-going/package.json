@@ -1,0 +1,45 @@
+{
+  "name": "@unblocklabs/openclaw-keep-going",
+  "version": "0.3.0",
+  "description": "OpenClaw Slack continuation plugin that starts a same-session follow-up run when the validator sees unfinished work",
+  "type": "module",
+  "main": "./dist/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/unblocklabs-ai/keep-going.git"
+  },
+  "homepage": "https://github.com/unblocklabs-ai/keep-going",
+  "bugs": {
+    "url": "https://github.com/unblocklabs-ai/keep-going/issues"
+  },
+  "keywords": [
+    "openclaw",
+    "plugin",
+    "slack",
+    "agent",
+    "validator",
+    "continuation"
+  ],
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.5.3",
+      "minGatewayVersion": "2026.5.3"
+    },
+    "build": {
+      "openclawVersion": "2026.5.3",
+      "pluginSdkVersion": "2026.5.3"
+    },
+    "release": {
+      "publishToClawHub": false,
+      "publishToNpm": false
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "openclaw.plugin.json"
+  ]
+}

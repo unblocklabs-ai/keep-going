@@ -315,6 +315,7 @@ test("continuation launch reuses the last inbound Slack message id and reply con
 
 test("plugin-triggered continuation flow dispatches assistant replies to the stored Slack thread", async () => {
   const deliveredPayloads: Array<Record<string, unknown>> = [];
+  const reactions: Array<Record<string, unknown>> = [];
   let embeddedPrompt: string | undefined;
   let embeddedTranscriptPrompt: unknown;
   const { api, hooks, emitTranscriptUpdate } = createMockApi(
@@ -346,6 +347,9 @@ test("plugin-triggered continuation flow dispatches assistant replies to the sto
       reason: "unfinished work remains",
       validatorModel: "gpt-5.4-mini",
     }),
+    addSlackReaction: async (_api, params) => {
+      reactions.push(params);
+    },
     launchContinuation,
   });
 
@@ -369,6 +373,15 @@ test("plugin-triggered continuation flow dispatches assistant replies to the sto
       ],
     },
   });
+  emitTranscriptUpdate({
+    sessionFile: SESSION_FILE,
+    sessionKey: SESSION_KEY,
+    messageId: "assistant-msg-1",
+    message: {
+      role: "assistant",
+      content: [{ type: "output_text", text: "I should continue." }],
+    },
+  });
 
   await agentEnd?.(
     {
@@ -389,40 +402,25 @@ test("plugin-triggered continuation flow dispatches assistant replies to the sto
     /Only use a normal assistant reply when you intend to end your turn\./,
   );
   assert.equal(embeddedTranscriptPrompt, "");
-  assert.equal(deliveredPayloads.length, 2);
+  assert.equal(reactions.length, 1);
+  assert.deepEqual(reactions[0], {
+    channelId: "C123",
+    messageId: "assistant-msg-1",
+    emoji: "eyes",
+    accountId: "default",
+  });
+  assert.equal(deliveredPayloads.length, 1);
   assert.equal(deliveredPayloads[0]?.to, "channel:C123");
   assert.equal(deliveredPayloads[0]?.threadId, "1712345678.000100");
   assert.equal(deliveredPayloads[0]?.replyToId, undefined);
   assert.deepEqual(deliveredPayloads[0]?.payload, {
-    text: "🦞 Keep going!",
-  });
-  assert.equal(deliveredPayloads[1]?.to, "channel:C123");
-  assert.equal(deliveredPayloads[1]?.threadId, "1712345678.000100");
-  assert.equal(deliveredPayloads[1]?.replyToId, undefined);
-  assert.deepEqual(deliveredPayloads[1]?.payload, {
     text: "It woke cleanly on 0.1.8...",
   });
 });
 
-test("user-facing notice sends custom text only when validator approves continuation", async () => {
-  const deliveredPayloads: Array<Record<string, unknown>> = [];
-  const { api, hooks } = createMockApi(
-    {
-      enabled: true,
-      userFacingNotice: {
-        enabled: true,
-        text: "Taking another pass.",
-      },
-    },
-    {
-      loadOutboundAdapter: async () => ({
-        sendPayload: async (ctx: Record<string, unknown>) => {
-          deliveredPayloads.push(ctx);
-          return { ok: true };
-        },
-      }),
-    },
-  );
+test("continuation reaction is added only when validator approves continuation", async () => {
+  const reactions: Array<Record<string, unknown>> = [];
+  const { api, hooks, emitTranscriptUpdate } = createMockApi({ enabled: true });
   const launchCalls: LaunchContinuationParams[] = [];
 
   registerKeepGoingPlugin(api, {
@@ -435,6 +433,9 @@ test("user-facing notice sends custom text only when validator approves continua
       launchCalls.push(params);
       return { followUpRunId: "follow-up-1" };
     },
+    addSlackReaction: async (_api, params) => {
+      reactions.push(params);
+    },
   });
 
   const beforeModelResolve = hooks.get("before_model_resolve");
@@ -442,6 +443,15 @@ test("user-facing notice sends custom text only when validator approves continua
   const runContext = createRunContext();
 
   await beforeModelResolve?.({ prompt: "Please continue the task." }, runContext);
+  emitTranscriptUpdate({
+    sessionFile: SESSION_FILE,
+    sessionKey: SESSION_KEY,
+    messageId: "assistant-msg-1",
+    message: {
+      role: "assistant",
+      content: [{ type: "output_text", text: "I should continue." }],
+    },
+  });
   await agentEnd?.(
     {
       success: true,
@@ -451,30 +461,23 @@ test("user-facing notice sends custom text only when validator approves continua
   );
 
   assert.equal(launchCalls.length, 1);
-  assert.equal(deliveredPayloads.length, 1);
-  assert.deepEqual(deliveredPayloads[0]?.payload, {
-    text: "Taking another pass.",
+  assert.equal(reactions.length, 1);
+  assert.deepEqual(reactions[0], {
+    channelId: "C123",
+    messageId: "assistant-msg-1",
+    emoji: "eyes",
+    accountId: "default",
   });
-  assert.equal(deliveredPayloads[0]?.threadId, "1712345678.000100");
 });
 
-test("user-facing notice does not send when disabled", async () => {
-  const deliveredPayloads: Array<Record<string, unknown>> = [];
-  const { api, hooks } = createMockApi(
+test("continuation reaction is not added when disabled", async () => {
+  const reactions: Array<Record<string, unknown>> = [];
+  const { api, hooks, emitTranscriptUpdate } = createMockApi(
     {
       enabled: true,
-      userFacingNotice: {
+      continuationReaction: {
         enabled: false,
-        text: "Taking another pass.",
       },
-    },
-    {
-      loadOutboundAdapter: async () => ({
-        sendPayload: async (ctx: Record<string, unknown>) => {
-          deliveredPayloads.push(ctx);
-          return { ok: true };
-        },
-      }),
     },
   );
   const launchCalls: LaunchContinuationParams[] = [];
@@ -489,6 +492,9 @@ test("user-facing notice does not send when disabled", async () => {
       launchCalls.push(params);
       return { followUpRunId: "follow-up-1" };
     },
+    addSlackReaction: async (_api, params) => {
+      reactions.push(params);
+    },
   });
 
   const beforeModelResolve = hooks.get("before_model_resolve");
@@ -496,6 +502,15 @@ test("user-facing notice does not send when disabled", async () => {
   const runContext = createRunContext();
 
   await beforeModelResolve?.({ prompt: "Please continue the task." }, runContext);
+  emitTranscriptUpdate({
+    sessionFile: SESSION_FILE,
+    sessionKey: SESSION_KEY,
+    messageId: "assistant-msg-1",
+    message: {
+      role: "assistant",
+      content: [{ type: "output_text", text: "I should continue." }],
+    },
+  });
   await agentEnd?.(
     {
       success: true,
@@ -505,22 +520,12 @@ test("user-facing notice does not send when disabled", async () => {
   );
 
   assert.equal(launchCalls.length, 1);
-  assert.equal(deliveredPayloads.length, 0);
+  assert.equal(reactions.length, 0);
 });
 
-test("user-facing notice is not sent when validator declines continuation", async () => {
-  const deliveredPayloads: Array<Record<string, unknown>> = [];
-  const { api, hooks } = createMockApi(
-    { enabled: true },
-    {
-      loadOutboundAdapter: async () => ({
-        sendPayload: async (ctx: Record<string, unknown>) => {
-          deliveredPayloads.push(ctx);
-          return { ok: true };
-        },
-      }),
-    },
-  );
+test("continuation reaction is not added when validator declines continuation", async () => {
+  const reactions: Array<Record<string, unknown>> = [];
+  const { api, hooks, emitTranscriptUpdate } = createMockApi({ enabled: true });
   const launchCalls: LaunchContinuationParams[] = [];
 
   registerKeepGoingPlugin(api, {
@@ -533,6 +538,9 @@ test("user-facing notice is not sent when validator declines continuation", asyn
       launchCalls.push(params);
       return { followUpRunId: "follow-up-1" };
     },
+    addSlackReaction: async (_api, params) => {
+      reactions.push(params);
+    },
   });
 
   const beforeModelResolve = hooks.get("before_model_resolve");
@@ -540,6 +548,15 @@ test("user-facing notice is not sent when validator declines continuation", asyn
   const runContext = createRunContext();
 
   await beforeModelResolve?.({ prompt: "Please continue the task." }, runContext);
+  emitTranscriptUpdate({
+    sessionFile: SESSION_FILE,
+    sessionKey: SESSION_KEY,
+    messageId: "assistant-msg-1",
+    message: {
+      role: "assistant",
+      content: [{ type: "output_text", text: "All done." }],
+    },
+  });
   await agentEnd?.(
     {
       success: true,
@@ -549,20 +566,14 @@ test("user-facing notice is not sent when validator declines continuation", asyn
   );
 
   assert.equal(launchCalls.length, 0);
-  assert.equal(deliveredPayloads.length, 0);
+  assert.equal(reactions.length, 0);
 });
 
-test("user-facing notice failure does not block continuation launch", async () => {
-  const { api, hooks, logs } = createMockApi(
-    { enabled: true, debug_logs: false },
-    {
-      loadOutboundAdapter: async () => ({
-        sendPayload: async () => {
-          throw new Error("slack unavailable");
-        },
-      }),
-    },
-  );
+test("continuation reaction failure does not block continuation launch", async () => {
+  const { api, hooks, logs, emitTranscriptUpdate } = createMockApi({
+    enabled: true,
+    debug_logs: false,
+  });
   const launchCalls: LaunchContinuationParams[] = [];
 
   registerKeepGoingPlugin(api, {
@@ -575,6 +586,9 @@ test("user-facing notice failure does not block continuation launch", async () =
       launchCalls.push(params);
       return { followUpRunId: "follow-up-1" };
     },
+    addSlackReaction: async () => {
+      throw new Error("slack unavailable");
+    },
   });
 
   const beforeModelResolve = hooks.get("before_model_resolve");
@@ -582,6 +596,15 @@ test("user-facing notice failure does not block continuation launch", async () =
   const runContext = createRunContext();
 
   await beforeModelResolve?.({ prompt: "Please continue the task." }, runContext);
+  emitTranscriptUpdate({
+    sessionFile: SESSION_FILE,
+    sessionKey: SESSION_KEY,
+    messageId: "assistant-msg-1",
+    message: {
+      role: "assistant",
+      content: [{ type: "output_text", text: "I should continue." }],
+    },
+  });
   await agentEnd?.(
     {
       success: true,
@@ -592,7 +615,7 @@ test("user-facing notice failure does not block continuation launch", async () =
 
   assert.equal(launchCalls.length, 1);
   assert.equal(logs.error.length, 1);
-  assert.equal(logs.error[0]?.message, "Keep-Going Plugin: user-facing continuation notice failed");
+  assert.equal(logs.error[0]?.message, "Keep-Going Plugin: continuation reaction failed");
   assert.equal(logs.error[0]?.meta?.error, "slack unavailable");
 });
 

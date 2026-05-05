@@ -5,6 +5,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const ROOT = process.cwd();
+const MARKETPLACE_SOURCE = "marketplace/keep-going";
 
 function fail(message) {
   console.error(message);
@@ -70,9 +71,26 @@ if (!marketplacePlugin) {
 if (marketplacePlugin.version !== packageJson.version) {
   fail(`Version mismatch: marketplace plugin=${marketplacePlugin.version} package.json=${packageJson.version}`);
 }
-if (marketplacePlugin.source !== ".") {
+if (marketplacePlugin.source !== MARKETPLACE_SOURCE) {
   fail(`Unexpected marketplace source: ${marketplacePlugin.source}`);
 }
+
+const marketplacePackage = readJson(path.join(MARKETPLACE_SOURCE, "package.json"));
+const marketplacePluginManifest = readJson(path.join(MARKETPLACE_SOURCE, "openclaw.plugin.json"));
+if (marketplacePackage.version !== packageJson.version) {
+  fail(
+    `Version mismatch: marketplace package=${marketplacePackage.version} package.json=${packageJson.version}`,
+  );
+}
+if (marketplacePackage.scripts || marketplacePackage.devDependencies) {
+  fail("Marketplace package must not include development scripts or devDependencies");
+}
+if (marketplacePluginManifest.version !== pluginManifest.version) {
+  fail(
+    `Version mismatch: marketplace openclaw.plugin.json=${marketplacePluginManifest.version} root openclaw.plugin.json=${pluginManifest.version}`,
+  );
+}
+assertFile(path.join(MARKETPLACE_SOURCE, "dist", "index.js"));
 
 const importedEntry = await import(pathToFileURL(path.join(ROOT, "dist", "index.js")).href);
 if (importedEntry.default?.id !== "keep-going" || typeof importedEntry.default?.register !== "function") {

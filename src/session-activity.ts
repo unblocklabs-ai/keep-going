@@ -11,6 +11,10 @@ type UserMessageSnapshot = {
   messageId: string;
 };
 
+type AssistantMessageSnapshot = {
+  messageId: string;
+};
+
 type GuardSnapshot = {
   sessionKey?: ActivitySnapshot;
   sessionFile?: ActivitySnapshot;
@@ -61,6 +65,8 @@ export class SessionActivityTracker {
   private readonly transcriptBySessionFile = new Map<string, ActivitySnapshot>();
   private readonly lastUserMessageBySessionKey = new Map<string, UserMessageSnapshot>();
   private readonly lastUserMessageBySessionFile = new Map<string, UserMessageSnapshot>();
+  private readonly lastAssistantMessageBySessionKey = new Map<string, AssistantMessageSnapshot>();
+  private readonly lastAssistantMessageBySessionFile = new Map<string, AssistantMessageSnapshot>();
   private readonly endedRunAtByRunId = new Map<string, number>();
   private readonly runStateByRunId = new Map<string, RunState>();
   private readonly latestRunStartSequenceBySessionKey = new Map<string, number>();
@@ -237,7 +243,17 @@ export class SessionActivityTracker {
       this.transcriptBySessionKey.set(sessionKey, { messageId });
     }
 
-    if (getMessageRole(update.message) !== "user") {
+    const role = getMessageRole(update.message);
+    if (role === "assistant") {
+      const assistantSnapshot: AssistantMessageSnapshot = { messageId };
+      this.lastAssistantMessageBySessionFile.set(sessionFile, assistantSnapshot);
+      if (sessionKey) {
+        this.lastAssistantMessageBySessionKey.set(sessionKey, assistantSnapshot);
+      }
+      return;
+    }
+
+    if (role !== "user") {
       return;
     }
 
@@ -307,6 +323,25 @@ export class SessionActivityTracker {
 
     const sessionFile = normalizeString(params.sessionFile);
     return sessionFile ? this.lastUserMessageBySessionFile.get(sessionFile)?.messageId : undefined;
+  }
+
+  getLatestAssistantMessageId(params: {
+    sessionKey?: string;
+    sessionFile?: string;
+  }): string | undefined {
+    this.pruneStaleRunState(Date.now());
+    const sessionKey = normalizeSessionKey(params.sessionKey);
+    const bySessionKey = sessionKey
+      ? this.lastAssistantMessageBySessionKey.get(sessionKey)?.messageId
+      : undefined;
+    if (bySessionKey) {
+      return bySessionKey;
+    }
+
+    const sessionFile = normalizeString(params.sessionFile);
+    return sessionFile
+      ? this.lastAssistantMessageBySessionFile.get(sessionFile)?.messageId
+      : undefined;
   }
 
   clearRun(runId?: string): void {

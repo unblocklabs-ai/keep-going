@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { KEEP_GOING_SYNTHETIC_WAKE_PREFIX } from "../src/constants.js";
-import { DEFAULT_USER_FACING_NOTICE_TEXT, resolveKeepGoingConfig } from "../src/config.js";
+import { resolveKeepGoingConfig } from "../src/config.js";
 import { buildValidatorPrompt } from "../src/llm-validator.js";
 import {
   resolveContinuationSessionFile,
@@ -145,24 +145,51 @@ test("shared default validator config matches runtime plugin defaults", () => {
   );
 });
 
-test("user-facing notice config defaults enabled with the lobster text", () => {
-  assert.deepEqual(resolveKeepGoingConfig({}).userFacingNotice, {
+test("continuation reaction config defaults enabled", () => {
+  assert.deepEqual(resolveKeepGoingConfig({}).continuationReaction, {
     enabled: true,
-    text: DEFAULT_USER_FACING_NOTICE_TEXT,
   });
 });
 
-test("user-facing notice config supports disabled and custom text", () => {
+test("continuation reaction config supports disabled", () => {
+  assert.deepEqual(
+    resolveKeepGoingConfig({
+      continuationReaction: {
+        enabled: false,
+      },
+    }).continuationReaction,
+    {
+      enabled: false,
+    },
+  );
+});
+
+test("legacy user-facing notice disabled config disables continuation reaction by default", () => {
   assert.deepEqual(
     resolveKeepGoingConfig({
       userFacingNotice: {
         enabled: false,
         text: "Taking another pass.",
       },
-    }).userFacingNotice,
+    }).continuationReaction,
     {
       enabled: false,
-      text: "Taking another pass.",
+    },
+  );
+});
+
+test("continuation reaction config overrides legacy user-facing notice config", () => {
+  assert.deepEqual(
+    resolveKeepGoingConfig({
+      continuationReaction: {
+        enabled: true,
+      },
+      userFacingNotice: {
+        enabled: false,
+      },
+    }).continuationReaction,
+    {
+      enabled: true,
     },
   );
 });
@@ -203,25 +230,6 @@ test("validator prompt can include up to the last three user turns from session 
   assert.doesNotMatch(prompt, /first request that should be excluded/i);
 });
 
-test("validator prompt ignores configured candidate notice text", () => {
-  const candidate = createCandidate([
-    { role: "assistant", content: "🦞 Keep going!" },
-    { role: "assistant", content: "I still need to finish the task." },
-  ]);
-  candidate.ignoredTranscriptTexts = ["🦞 Keep going!"];
-
-  const prompt = buildValidatorPrompt({
-    candidate,
-    config: createValidatorConfig({
-      maxMessages: 10,
-      includeCurrentTurnOnly: false,
-    }),
-  });
-
-  assert.doesNotMatch(prompt, /Keep going!/i);
-  assert.match(prompt, /I still need to finish the task\./i);
-});
-
 test("normalizeTranscriptMessages skips assistant NO_REPLY content", () => {
   const transcript = normalizeTranscriptMessages([
     { role: "assistant", content: "NO_REPLY" },
@@ -253,18 +261,6 @@ test("normalizeTranscriptMessages skips synthetic continuation wake prompts", ()
     { role: "user", content: "Continue the previous task." },
     { role: "user", content: "Real user follow-up" },
   ]);
-
-  assert.deepEqual(transcript, [{ role: "user", text: "Real user follow-up" }]);
-});
-
-test("normalizeTranscriptMessages skips configured ignored notice text", () => {
-  const transcript = normalizeTranscriptMessages(
-    [
-      { role: "assistant", content: "🦞 Keep going!" },
-      { role: "user", content: "Real user follow-up" },
-    ],
-    { ignoredTexts: ["🦞 Keep going!"] },
-  );
 
   assert.deepEqual(transcript, [{ role: "user", text: "Real user follow-up" }]);
 });
@@ -392,10 +388,8 @@ test("session activity tracker does not persist synthetic continuation wake prom
   ]);
 });
 
-test("session activity tracker ignores configured user-facing notice text", () => {
-  const tracker = new SessionActivityTracker({
-    ignoredTexts: ["Taking another pass."],
-  });
+test("session activity tracker records the latest assistant message id", () => {
+  const tracker = new SessionActivityTracker();
 
   tracker.markRunStarted({
     sessionKey: SLACK_SESSION_KEY,
@@ -407,10 +401,10 @@ test("session activity tracker ignores configured user-facing notice text", () =
   tracker.recordTranscriptUpdate({
     sessionFile: SLACK_SESSION_FILE,
     sessionKey: SLACK_SESSION_KEY,
-    messageId: "notice-msg-1",
+    messageId: "assistant-msg-1",
     message: {
       role: "assistant",
-      content: [{ type: "output_text", text: "Taking another pass." }],
+      content: [{ type: "output_text", text: "First assistant message" }],
     },
   });
 
@@ -424,12 +418,13 @@ test("session activity tracker ignores configured user-facing notice text", () =
     },
   });
 
-  assert.deepEqual(tracker.getRunTranscriptMessages("run-1"), [
-    { role: "assistant", text: "Real assistant work" },
-  ]);
-  assert.deepEqual(tracker.getSessionTranscriptMessages(SLACK_SESSION_KEY), [
-    { role: "assistant", text: "Real assistant work" },
-  ]);
+  assert.equal(
+    tracker.getLatestAssistantMessageId({
+      sessionKey: SLACK_SESSION_KEY,
+      sessionFile: SLACK_SESSION_FILE,
+    }),
+    "assistant-msg-2",
+  );
 });
 
 test("extract human-facing final turn messages skip control text and synthetic continuation prompts", () => {

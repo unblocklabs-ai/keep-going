@@ -16,6 +16,7 @@ const RELEASE_STAGE_PATHS = [
   "openclaw.plugin.json",
   ".claude-plugin/marketplace.json",
   "dist",
+  "marketplace/keep-going",
 ];
 
 function fail(message) {
@@ -191,6 +192,7 @@ function main() {
   } else {
     run("npm", ["run", "build"], { dryRun: args.dryRun });
   }
+  run("npm", ["run", "marketplace:sync"], { dryRun: args.dryRun });
 
   run("git", ["add", ...RELEASE_STAGE_PATHS], { dryRun: args.dryRun });
   run("git", ["commit", "-m", commitMessage], { dryRun: args.dryRun });
