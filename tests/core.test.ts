@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { KEEP_GOING_SYNTHETIC_WAKE_PREFIX } from "../src/constants.js";
+import {
+  KEEP_GOING_SYNTHETIC_WAKE_PREFIX,
+  OPENCLAW_RUNTIME_EVENT_USER_PROMPT,
+} from "../src/constants.js";
 import { resolveKeepGoingConfig } from "../src/config.js";
 import { buildValidatorPrompt } from "../src/llm-validator.js";
 import {
@@ -568,6 +571,7 @@ test("normalizeTranscriptMessages skips synthetic continuation wake prompts", ()
         "Recommended next step: Patch the worker and verify it.",
       ].join("\n"),
     },
+    { role: "user", content: OPENCLAW_RUNTIME_EVENT_USER_PROMPT },
     { role: "user", content: "Continue the previous task." },
     { role: "user", content: "Real user follow-up" },
   ]);
@@ -668,12 +672,16 @@ test("session activity tracker does not persist synthetic continuation wake prom
           type: "input_text",
           text: [
             KEEP_GOING_SYNTHETIC_WAKE_PREFIX,
-            "Your previous turn likely ended early while actionable work still remained.",
-            "Resume the same task now.",
-            'Reminder: for a visible, non-turn-terminating update, use `message(action="send", ...)` and then keep working in the same turn.',
-            "Only use a normal assistant reply when you intend to end your turn.",
-            "If you are blocked, state the exact blocker briefly. If already complete, reply `NO_REPLY`.",
-            "Recommended next step: Patch the worker and verify it.",
+            "A validator thinks your previous turn may have ended before the task was fully handled.",
+            "",
+            "Reassess the latest conversation state. If there is still useful, actionable work remaining, continue with the next step. If the task is complete, no longer relevant, or blocked, do not invent work.",
+            "",
+            'For a visible progress update that should not end your turn, use `message(action="send", ...)` and keep working in the same turn.',
+            "Use a normal assistant reply only when you intend to end your turn.",
+            "",
+            "If blocked, state the exact blocker briefly. If there is nothing useful to do, reply `NO_REPLY`.",
+            "",
+            "Validator-suggested next step: Patch the worker and verify it.",
           ].join("\n"),
         },
       ],
@@ -743,12 +751,16 @@ test("extract human-facing final turn messages skip control text and synthetic c
       role: "user",
       content: [
         KEEP_GOING_SYNTHETIC_WAKE_PREFIX,
-        "Your previous turn likely ended early while actionable work still remained.",
-        "Resume the same task now.",
-        'Reminder: for a visible, non-turn-terminating update, use `message(action="send", ...)` and then keep working in the same turn.',
-        "Only use a normal assistant reply when you intend to end your turn.",
-        "If you are blocked, state the exact blocker briefly. If already complete, reply `NO_REPLY`.",
-        "Recommended next step: Patch the worker and verify it.",
+        "A validator thinks your previous turn may have ended before the task was fully handled.",
+        "",
+        "Reassess the latest conversation state. If there is still useful, actionable work remaining, continue with the next step. If the task is complete, no longer relevant, or blocked, do not invent work.",
+        "",
+        'For a visible progress update that should not end your turn, use `message(action="send", ...)` and keep working in the same turn.',
+        "Use a normal assistant reply only when you intend to end your turn.",
+        "",
+        "If blocked, state the exact blocker briefly. If there is nothing useful to do, reply `NO_REPLY`.",
+        "",
+        "Validator-suggested next step: Patch the worker and verify it.",
       ].join("\n"),
     },
     {
@@ -793,6 +805,8 @@ test("extract human-facing final turn messages skip control text and synthetic c
 });
 
 test("normalizeHumanFacingUserText skips internal runtime wake-up messages", () => {
+  assert.equal(normalizeHumanFacingUserText(OPENCLAW_RUNTIME_EVENT_USER_PROMPT), undefined);
+
   const cleaned = normalizeHumanFacingUserText([
     "[Fri 2026-04-10 16:40 EDT] <<<BEGIN_OPENCLAW_INTERNAL_CONTEXT>>>",
     "OpenClaw runtime context (internal):",

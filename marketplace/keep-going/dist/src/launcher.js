@@ -4,15 +4,19 @@ import { createReplyDispatcher } from "openclaw/plugin-sdk/reply-runtime";
 import { KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX, KEEP_GOING_SYNTHETIC_WAKE_PREFIX, } from "./constants.js";
 function buildContinuationWakePrompt(params) {
     const instruction = params.decision.followUpInstruction?.trim();
-    const nextStep = instruction || "Perform the next remaining actionable step now.";
+    const nextStep = instruction || "Reassess the task and continue only if there is a clear remaining actionable step.";
     return [
         KEEP_GOING_SYNTHETIC_WAKE_PREFIX,
-        "Your previous turn likely ended early while actionable work still remained.",
-        "Resume the same task now.",
-        'Reminder: for a visible, non-turn-terminating update, use `message(action="send", ...)` and then keep working in the same turn.',
-        "Only use a normal assistant reply when you intend to end your turn.",
-        "If you are blocked, state the exact blocker briefly. If already complete, reply `NO_REPLY`.",
-        `Recommended next step: ${nextStep}`,
+        "A validator thinks your previous turn may have ended before the task was fully handled.",
+        "",
+        "Reassess the latest conversation state. If there is still useful, actionable work remaining, continue with the next step. If the task is complete, no longer relevant, or blocked, do not invent work.",
+        "",
+        'For a visible progress update that should not end your turn, use `message(action="send", ...)` and keep working in the same turn.',
+        "Use a normal assistant reply only when you intend to end your turn.",
+        "",
+        "If blocked, state the exact blocker briefly. If there is nothing useful to do, reply `NO_REPLY`.",
+        "",
+        `Validator-suggested next step: ${nextStep}`,
     ].join("\n");
 }
 export function resolveContinuationSessionFile(api, params) {
@@ -134,7 +138,7 @@ export async function launchContinuation(api, params, logger) {
             workspaceDir: params.candidate.workspaceDir,
             config: api.config,
             prompt,
-            transcriptPrompt: "",
+            transcriptPrompt: prompt,
             provider,
             model,
             authProfileId: params.sessionRoute.authProfileId,

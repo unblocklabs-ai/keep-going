@@ -1,4 +1,7 @@
-import { KEEP_GOING_SYNTHETIC_WAKE_PREFIX } from "./constants.js";
+import {
+  KEEP_GOING_SYNTHETIC_WAKE_PREFIX,
+  OPENCLAW_RUNTIME_EVENT_USER_PROMPT,
+} from "./constants.js";
 import { normalizeString } from "./normalize.js";
 import type {
   SlackThreadHistoryMessage,
@@ -30,6 +33,7 @@ function isSyntheticUserText(value: string): boolean {
   const trimmed = value.trim();
   return (
     trimmed === CONTINUE_PREVIOUS_TASK_TEXT ||
+    trimmed === OPENCLAW_RUNTIME_EVENT_USER_PROMPT ||
     trimmed.startsWith(KEEP_GOING_SYNTHETIC_WAKE_PREFIX)
   );
 }

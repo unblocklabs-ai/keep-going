@@ -395,13 +395,21 @@ test("plugin-triggered continuation flow dispatches assistant replies to the sto
   assert.match(embeddedPrompt ?? "", new RegExp(`^\\${KEEP_GOING_SYNTHETIC_WAKE_PREFIX}`));
   assert.match(
     embeddedPrompt ?? "",
-    /Resume the same task now\./,
+    /A validator thinks your previous turn may have ended before the task was fully handled\./,
   );
   assert.match(
     embeddedPrompt ?? "",
-    /Only use a normal assistant reply when you intend to end your turn\./,
+    /Reassess the latest conversation state\./,
   );
-  assert.equal(embeddedTranscriptPrompt, "");
+  assert.match(
+    embeddedPrompt ?? "",
+    /do not invent work\./,
+  );
+  assert.match(
+    embeddedPrompt ?? "",
+    /Use a normal assistant reply only when you intend to end your turn\./,
+  );
+  assert.equal(embeddedTranscriptPrompt, embeddedPrompt);
   assert.equal(reactions.length, 1);
   assert.deepEqual(reactions[0], {
     channelId: "C123",

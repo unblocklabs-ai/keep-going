@@ -85,21 +85,29 @@ test("plugin-started continuation replies route to the stored Slack thread with 
           assert.match(String(runParams.prompt), new RegExp(`^\\${KEEP_GOING_SYNTHETIC_WAKE_PREFIX}`));
           assert.match(
             String(runParams.prompt),
-            /Resume the same task now\./,
+            /A validator thinks your previous turn may have ended before the task was fully handled\./,
           );
           assert.match(
             String(runParams.prompt),
-            /Only use a normal assistant reply when you intend to end your turn\./,
+            /Reassess the latest conversation state\./,
           );
           assert.match(
             String(runParams.prompt),
-            /If you are blocked, state the exact blocker briefly\. If already complete, reply `NO_REPLY`\./,
+            /do not invent work\./,
           );
           assert.match(
             String(runParams.prompt),
-            /Recommended next step: Keep going until the task is complete\./,
+            /Use a normal assistant reply only when you intend to end your turn\./,
           );
-          assert.equal(runParams.transcriptPrompt, "");
+          assert.match(
+            String(runParams.prompt),
+            /If blocked, state the exact blocker briefly\. If there is nothing useful to do, reply `NO_REPLY`\./,
+          );
+          assert.match(
+            String(runParams.prompt),
+            /Validator-suggested next step: Keep going until the task is complete\./,
+          );
+          assert.equal(runParams.transcriptPrompt, runParams.prompt);
           assert.equal(typeof runParams.onBlockReply, "function");
           assert.equal(typeof runParams.onToolResult, "function");
 
