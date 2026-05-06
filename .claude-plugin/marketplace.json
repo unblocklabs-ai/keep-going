@@ -1,10 +1,10 @@
 {
   "name": "Keep Going Marketplace",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "plugins": [
     {
       "name": "keep-going",
-      "version": "0.3.3",
+      "version": "0.3.4",
       "description": "Starts one same-session Slack follow-up run when a validator sees unfinished work",
       "source": "marketplace/keep-going"
     }
