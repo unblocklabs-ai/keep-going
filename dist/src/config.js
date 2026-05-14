@@ -1,7 +1,7 @@
 import { createDefaultOpenAiValidatorConfig, } from "./openai-validator-config.js";
 import { isSecretRef } from "openclaw/plugin-sdk/secret-input-runtime";
 export const CONTINUATION_REACTION_EMOJI = "eyes";
-export const DEFAULT_CONTINUATION_NOTICE_TEXT = ":eyes: continuing...";
+const DEFAULT_CONTINUATION_NOTICE_TEXT = ":eyes: continuing...";
 const DEFAULT_CONFIG = {
     enabled: true,
     debug_logs: false,

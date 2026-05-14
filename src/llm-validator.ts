@@ -1,5 +1,5 @@
 import { normalizeTranscriptMessages } from "./messages.js";
-import { normalizeString } from "./normalize.js";
+import { clipText, normalizeString } from "./normalize.js";
 import { resolveLlmApiKey } from "./openai-api-key.js";
 import { OPENAI_VALIDATOR_INTERNAL_DEFAULTS } from "./openai-validator-config.js";
 import { callResponsesJsonSchema } from "./responses-json-schema.js";
@@ -38,13 +38,6 @@ type ParsedContinuationDecision = {
   reason?: unknown;
   follow_up_instruction?: unknown;
 };
-
-function clipText(value: string, maxChars: number): string {
-  if (value.length <= maxChars) {
-    return value;
-  }
-  return value.slice(0, Math.max(0, maxChars - 1)).trimEnd() + "…";
-}
 
 function buildCurrentTurnWindow(
   messages: TranscriptMessage[],

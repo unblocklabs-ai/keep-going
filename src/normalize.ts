@@ -16,3 +16,10 @@ export function normalizeThreadId(value: unknown): string | undefined {
   }
   return undefined;
 }
+
+export function clipText(value: string, maxChars: number): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+  return value.slice(0, Math.max(0, maxChars - 1)).trimEnd() + "…";
+}

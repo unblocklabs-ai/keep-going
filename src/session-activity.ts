@@ -1,4 +1,5 @@
 import { normalizeTranscriptMessages, type TranscriptNormalizationOptions } from "./messages.js";
+import { isConversationMessage, readMessageRole } from "./message-role.js";
 import { normalizeString } from "./normalize.js";
 import { normalizeOptionalTrackingSessionKey } from "./session-key.js";
 import type { TranscriptMessage } from "./transcript-types.js";
@@ -270,7 +271,7 @@ export class SessionActivityTracker {
       this.transcriptBySessionKey.set(sessionKey, { messageId });
     }
 
-    const role = getMessageRole(update.message);
+    const role = readMessageRole(update.message);
     if (role === "assistant") {
       const assistantSnapshot: AssistantMessageSnapshot = { messageId };
       this.lastAssistantMessageBySessionFile.set(sessionFile, assistantSnapshot);
@@ -449,23 +450,6 @@ export class SessionActivityTracker {
     }
     this.latestRunStartSequenceBySessionKey.delete(sessionKey);
   }
-}
-
-function isConversationMessage(message: unknown): boolean {
-  if (!message || typeof message !== "object") {
-    return false;
-  }
-  const role = (message as { role?: unknown }).role;
-  return role === "user" || role === "assistant";
-}
-
-function getMessageRole(message: unknown): string | undefined {
-  if (!message || typeof message !== "object") {
-    return undefined;
-  }
-
-  const role = (message as { role?: unknown }).role;
-  return typeof role === "string" ? role : undefined;
 }
 
 function normalizeSessionKey(value?: string): string | undefined {

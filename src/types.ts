@@ -1,11 +1,10 @@
 import type { TranscriptMessage } from "./transcript-types.js";
 import type { SecretRef } from "openclaw/plugin-sdk/secret-ref-runtime";
 
-export type KeepGoingLlmValidatorProvider = "openai";
 export type SlackReplyToMode = "off" | "first" | "all" | "batched";
 
 export type OpenAiLlmCallConfig = {
-  provider: KeepGoingLlmValidatorProvider;
+  provider: "openai";
   model: string;
   apiKeyRef?: SecretRef;
   apiKey?: string;

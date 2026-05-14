@@ -16,6 +16,7 @@ type MockLoggerCall = {
 
 type MockApiOptions = {
   runEmbeddedPiAgent?: (params: Record<string, unknown>) => Promise<unknown>;
+  sessionStore?: Record<string, unknown>;
   loadOutboundAdapter?: (channelId: string) => Promise<{
     sendPayload?: (ctx: Record<string, unknown>) => Promise<unknown>;
     sendText?: (ctx: Record<string, unknown>) => Promise<unknown>;
@@ -54,14 +55,14 @@ function createMockApi(
     error: (message: string, meta?: Record<string, unknown>) => logs.error.push({ message, meta }),
   };
 
-  const sessionStore = {
+  const sessionStore = options.sessionStore ?? {
     [SESSION_KEY]: {
       sessionFile: SESSION_FILE,
       deliveryContext: {
-      channel: "slack",
-      to: "channel:C123",
-      accountId: "default",
-      threadId: "1712345678.000100",
+        channel: "slack",
+        to: "channel:C123",
+        accountId: "default",
+        threadId: "1712345678.000100",
       },
       modelProvider: "openai-codex",
       model: "gpt-5.4",
@@ -284,6 +285,141 @@ test("agent_end reuses provider and model captured before model resolution", asy
   assert.equal(launchCalls.length, 1);
   assert.equal(launchCalls[0]?.candidate.modelProviderId, "openai-codex");
   assert.equal(launchCalls[0]?.candidate.modelId, "gpt-5.4");
+});
+
+test("unresolved continuation model route skips before reaction notice launch and dedupe", async () => {
+  const reactions: Array<Record<string, unknown>> = [];
+  const notices: Array<Record<string, unknown>> = [];
+  const launchCalls: LaunchContinuationParams[] = [];
+  let validatorCalls = 0;
+  const { api, hooks, logs, emitTranscriptUpdate } = createMockApi(
+    { enabled: true, debug_logs: true },
+    {
+      sessionStore: {
+        [SESSION_KEY]: {
+          sessionFile: SESSION_FILE,
+          deliveryContext: {
+            channel: "slack",
+            to: "channel:C123",
+            accountId: "default",
+            threadId: "1712345678.000100",
+          },
+          modelProvider: " ",
+          model: "",
+        },
+      },
+      loadOutboundAdapter: async () => ({
+        sendPayload: async (ctx: Record<string, unknown>) => {
+          notices.push(ctx);
+        },
+      }),
+    },
+  );
+
+  registerKeepGoingPlugin(api, {
+    validateContinuationWithLlm: async () => {
+      validatorCalls += 1;
+      return {
+        continue: true,
+        reason: "unfinished work remains",
+        validatorModel: "gpt-5.4-mini",
+      };
+    },
+    launchContinuation: async (_api, params) => {
+      launchCalls.push(params);
+      return { followUpRunId: "follow-up-1" };
+    },
+    addSlackReaction: async (_api, params) => {
+      reactions.push(params);
+    },
+  });
+
+  const agentEnd = hooks.get("agent_end");
+  const runContext = {
+    ...createRunContext(),
+    modelProviderId: " ",
+    modelId: "",
+  };
+
+  emitTranscriptUpdate({
+    sessionFile: SESSION_FILE,
+    sessionKey: SESSION_KEY,
+    messageId: "1776309281.000200",
+    message: {
+      role: "assistant",
+      content: [{ type: "output_text", text: "I should continue." }],
+    },
+  });
+
+  const endEvent = {
+    success: true,
+    messages: [],
+  };
+  await agentEnd?.(endEvent, runContext);
+  await agentEnd?.(endEvent, runContext);
+
+  assert.equal(validatorCalls, 2);
+  assert.equal(launchCalls.length, 0);
+  assert.equal(reactions.length, 0);
+  assert.equal(notices.length, 0);
+  assert.equal(
+    logs.error.filter(
+      (entry) => entry.message === "Keep-Going Plugin: continuation wake aborted before launch",
+    ).length,
+    2,
+  );
+  assert.equal(
+    logs.info.some((entry) => entry.message === "Keep-Going Plugin: skip: already retriggered"),
+    false,
+  );
+});
+
+test("validator-approved continuation is aborted when a subagent starts during validation", async () => {
+  const { api, hooks, logs } = createMockApi({ enabled: true, debug_logs: true });
+  const launchCalls: LaunchContinuationParams[] = [];
+
+  registerKeepGoingPlugin(api, {
+    validateContinuationWithLlm: async () => {
+      const subagentSpawned = hooks.get("subagent_spawned");
+      await subagentSpawned?.(
+        {
+          childSessionKey: `${SESSION_KEY}:subagent:child-1`,
+        },
+        {
+          requesterSessionKey: SESSION_KEY,
+        },
+      );
+      return {
+        continue: true,
+        reason: "unfinished work remains",
+        validatorModel: "gpt-5.4-mini",
+      };
+    },
+    launchContinuation: async (_api, params) => {
+      launchCalls.push(params);
+      return { followUpRunId: "follow-up-1" };
+    },
+  });
+
+  const beforeModelResolve = hooks.get("before_model_resolve");
+  const agentEnd = hooks.get("agent_end");
+  const runContext = createRunContext();
+
+  await beforeModelResolve?.({ prompt: "Please continue the task." }, runContext);
+  await agentEnd?.(
+    {
+      success: true,
+      messages: [],
+    },
+    runContext,
+  );
+
+  assert.equal(launchCalls.length, 0);
+  const skipLog = logs.info.find(
+    (entry) => entry.message === "Keep-Going Plugin: skip: subagent still in flight",
+  );
+  assert.ok(skipLog);
+  assert.deepEqual(skipLog.meta?.activeChildSessionKeys, [`${SESSION_KEY}:subagent:child-1`]);
 });
 
 test("continuation launch reuses the last inbound Slack message id and reply context", async () => {

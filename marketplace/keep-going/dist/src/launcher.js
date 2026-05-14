@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
-import { sendTextMediaPayload } from "openclaw/plugin-sdk/reply-payload";
 import { createReplyDispatcher } from "openclaw/plugin-sdk/reply-runtime";
+import { deliverChannelPayload } from "./channel-delivery.js";
 import { KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX, KEEP_GOING_SYNTHETIC_WAKE_PREFIX, } from "./constants.js";
 import { normalizeString } from "./normalize.js";
 function buildContinuationWakePrompt(params) {
@@ -23,17 +23,21 @@ function buildContinuationWakePrompt(params) {
 export function resolveContinuationSessionFile(api, params) {
     return api.runtime.agent.session.resolveSessionFilePath(params.candidate.sessionId, params.sessionRoute.sessionFile ? { sessionFile: params.sessionRoute.sessionFile } : undefined, { agentId: params.candidate.agentId });
 }
+export function resolveContinuationModelRoute(params) {
+    return {
+        provider: normalizeString(params.sessionRoute.modelProviderId) ??
+            normalizeString(params.candidate.modelProviderId),
+        model: normalizeString(params.sessionRoute.modelId) ?? normalizeString(params.candidate.modelId),
+    };
+}
 async function deliverContinuationReplyPayload(api, params, payload) {
     if (!params.sessionRoute.channel || !params.sessionRoute.to) {
         throw new Error("missing channel route for continuation reply delivery");
     }
-    const adapter = await api.runtime.channel.outbound.loadAdapter(params.sessionRoute.channel);
-    if (!adapter) {
-        throw new Error(`missing outbound adapter for channel ${params.sessionRoute.channel}`);
-    }
     const isSlackChannel = params.sessionRoute.channel === "slack";
-    const deliveryContext = {
-        cfg: api.config,
+    await deliverChannelPayload(api, {
+        channel: params.sessionRoute.channel,
+        operation: "continuation reply",
         to: params.sessionRoute.to,
         text: typeof payload.text === "string" ? payload.text : "",
         payload,
@@ -43,26 +47,11 @@ async function deliverContinuationReplyPayload(api, params, payload) {
             : payload.replyToId ??
                 (params.wakeContext.currentMessageId ? String(params.wakeContext.currentMessageId) : undefined),
         accountId: params.sessionRoute.accountId,
-    };
-    if (adapter.sendPayload) {
-        await adapter.sendPayload(deliveryContext);
-        return;
-    }
-    if (adapter.sendText || adapter.sendMedia) {
-        await sendTextMediaPayload({
-            channel: params.sessionRoute.channel,
-            ctx: deliveryContext,
-            adapter,
-        });
-        return;
-    }
-    throw new Error(`channel ${params.sessionRoute.channel} cannot deliver reply payloads`);
+    });
 }
 export async function launchContinuation(api, params, logger) {
     const followUpRunId = `${KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX}${crypto.randomUUID()}`;
-    const provider = normalizeString(params.sessionRoute.modelProviderId) ??
-        normalizeString(params.candidate.modelProviderId);
-    const model = normalizeString(params.sessionRoute.modelId) ?? normalizeString(params.candidate.modelId);
+    const { provider, model } = resolveContinuationModelRoute(params);
     const prompt = buildContinuationWakePrompt(params);
     if (!provider || !model) {
         logger?.error("continuation wake aborted before launch", {

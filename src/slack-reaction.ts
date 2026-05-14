@@ -13,7 +13,7 @@ type SlackReactionOptions = {
   timeoutMs?: number;
 };
 
-export type SlackReactionErrorDetails = {
+type SlackReactionErrorDetails = {
   status?: number;
   slackError?: string;
 };

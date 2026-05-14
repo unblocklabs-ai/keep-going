@@ -15,3 +15,9 @@ export function normalizeThreadId(value) {
     }
     return undefined;
 }
+export function clipText(value, maxChars) {
+    if (value.length <= maxChars) {
+        return value;
+    }
+    return value.slice(0, Math.max(0, maxChars - 1)).trimEnd() + "…";
+}

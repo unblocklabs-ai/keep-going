@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
+import { deliverChannelPayload } from "../src/channel-delivery.js";
 import { KEEP_GOING_SYNTHETIC_WAKE_PREFIX } from "../src/constants.js";
 import { launchContinuation } from "../src/launcher.js";
+import { sendSlackContinuationNotice } from "../src/slack-notice.js";
 import type { LaunchContinuationParams } from "../src/types.js";
 
 function createLaunchParams(): LaunchContinuationParams {
@@ -174,6 +176,175 @@ test("continuation launch fails when reply dispatch fails", async () => {
   await assert.rejects(
     () => launchContinuation(api, params),
     /continuation reply dispatch failed \(tool=0, block=1, final=0\)/,
+  );
+});
+
+test("continuation replies fall back to sendText when sendPayload is unavailable", async () => {
+  const params = createLaunchParams();
+  const deliveredTexts: Array<Record<string, unknown>> = [];
+
+  const api = {
+    config: {
+      channels: {
+        slack: {
+          replyToMode: "all",
+        },
+      },
+    },
+    runtime: {
+      channel: {
+        reply: {
+          resolveEffectiveMessagesConfig: () => ({ messagePrefix: "", responsePrefix: undefined }),
+          resolveHumanDelayConfig: () => undefined,
+        },
+        outbound: {
+          loadAdapter: async () => ({
+            sendText: async (ctx: Record<string, unknown>) => {
+              deliveredTexts.push(ctx);
+              return { ok: true };
+            },
+          }),
+        },
+      },
+      agent: {
+        runEmbeddedPiAgent: async (runParams: Record<string, unknown>) => {
+          await (runParams.onBlockReply as (payload: { text: string }) => Promise<void>)({
+            text: "Fallback delivery worked.",
+          });
+
+          return {} as never;
+        },
+      },
+    },
+  } as unknown as OpenClawPluginApi;
+
+  await launchContinuation(api, params);
+
+  assert.equal(deliveredTexts.length, 1);
+  assert.equal(deliveredTexts[0]?.to, "channel:C123");
+  assert.equal(deliveredTexts[0]?.text, "Fallback delivery worked.");
+  assert.equal(deliveredTexts[0]?.threadId, "1712345678.000100");
+  assert.equal(deliveredTexts[0]?.replyToId, undefined);
+  assert.equal(deliveredTexts[0]?.accountId, "default");
+});
+
+test("Slack continuation notices fall back to sendText when sendPayload is unavailable", async () => {
+  const deliveredTexts: Array<Record<string, unknown>> = [];
+  const api = {
+    config: {},
+    runtime: {
+      channel: {
+        outbound: {
+          loadAdapter: async (channelId: string) => {
+            assert.equal(channelId, "slack");
+            return {
+              sendText: async (ctx: Record<string, unknown>) => {
+                deliveredTexts.push(ctx);
+                return { ok: true };
+              },
+            };
+          },
+        },
+      },
+    },
+  } as unknown as OpenClawPluginApi;
+
+  await sendSlackContinuationNotice(api, {
+    route: createLaunchParams().sessionRoute,
+    text: "Still working...",
+  });
+
+  assert.equal(deliveredTexts.length, 1);
+  assert.equal(deliveredTexts[0]?.to, "channel:C123");
+  assert.equal(deliveredTexts[0]?.text, "Still working...");
+  assert.equal(deliveredTexts[0]?.threadId, "1712345678.000100");
+  assert.equal(deliveredTexts[0]?.replyToId, undefined);
+  assert.equal(deliveredTexts[0]?.accountId, "default");
+});
+
+test("channel delivery unsupported-adapter errors include the requested operation", async () => {
+  const api = {
+    config: {},
+    runtime: {
+      channel: {
+        outbound: {
+          loadAdapter: async () => ({}),
+        },
+      },
+    },
+  } as unknown as OpenClawPluginApi;
+
+  await assert.rejects(
+    () =>
+      deliverChannelPayload(api, {
+        channel: "slack",
+        operation: "continuation notice",
+        to: "channel:C123",
+        text: "Still working...",
+        payload: { text: "Still working..." },
+      }),
+    /channel slack cannot deliver continuation notice/,
+  );
+});
+
+test("channel delivery rejects text-only fallback when adapter has only sendMedia", async () => {
+  const api = {
+    config: {},
+    runtime: {
+      channel: {
+        outbound: {
+          loadAdapter: async () => ({
+            sendMedia: async () => {
+              throw new Error("sendMedia should not be called for text-only payloads");
+            },
+          }),
+        },
+      },
+    },
+  } as unknown as OpenClawPluginApi;
+
+  await assert.rejects(
+    () =>
+      deliverChannelPayload(api, {
+        channel: "slack",
+        operation: "continuation notice",
+        to: "channel:C123",
+        text: "Still working...",
+        payload: { text: "Still working..." },
+      }),
+    /channel slack cannot deliver continuation notice/,
+  );
+});
+
+test("channel delivery rejects media fallback when adapter has only sendText", async () => {
+  const api = {
+    config: {},
+    runtime: {
+      channel: {
+        outbound: {
+          loadAdapter: async () => ({
+            sendText: async () => {
+              throw new Error("sendText should not be called for media payloads");
+            },
+          }),
+        },
+      },
+    },
+  } as unknown as OpenClawPluginApi;
+
+  await assert.rejects(
+    () =>
+      deliverChannelPayload(api, {
+        channel: "slack",
+        operation: "continuation reply",
+        to: "channel:C123",
+        text: "See attachment.",
+        payload: {
+          text: "See attachment.",
+          mediaUrl: "https://example.com/image.png",
+        },
+      }),
+    /channel slack cannot deliver continuation reply/,
   );
 });
 
