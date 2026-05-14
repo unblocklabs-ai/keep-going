@@ -49,6 +49,8 @@ export class SessionActivityTracker {
             startSequence,
             startedAt: canReuseSequence ? existingState.startedAt : now,
             active: true,
+            modelProviderId: normalizeString(params.modelProviderId) ?? existingState?.modelProviderId,
+            modelId: normalizeString(params.modelId) ?? existingState?.modelId,
             trigger: normalizeString(params.trigger) ?? existingState?.trigger,
             source: normalizeString(params.source) ?? existingState?.source,
         });
@@ -127,6 +129,21 @@ export class SessionActivityTracker {
             trigger: runState.trigger,
             source: runState.source,
         }));
+    }
+    getRunModelResolution(runId) {
+        this.pruneStaleRunState(Date.now());
+        const key = normalizeString(runId);
+        if (!key) {
+            return undefined;
+        }
+        const runState = this.runStateByRunId.get(key);
+        if (!runState) {
+            return undefined;
+        }
+        return {
+            modelProviderId: runState.modelProviderId,
+            modelId: runState.modelId,
+        };
     }
     recordTranscriptUpdate(update) {
         this.pruneStaleRunState(Date.now());

@@ -248,6 +248,44 @@ test("before_model_resolve still marks runs active for validator transcript cont
   ]);
 });
 
+test("agent_end reuses provider and model captured before model resolution", async () => {
+  const { api, hooks } = createMockApi({ enabled: true });
+  const launchCalls: LaunchContinuationParams[] = [];
+
+  registerKeepGoingPlugin(api, {
+    validateContinuationWithLlm: async () => ({
+      continue: true,
+      reason: "unfinished work remains",
+      validatorModel: "gpt-5.4-mini",
+    }),
+    launchContinuation: async (_api, params) => {
+      launchCalls.push(params);
+      return { followUpRunId: "follow-up-1" };
+    },
+  });
+
+  const beforeModelResolve = hooks.get("before_model_resolve");
+  const agentEnd = hooks.get("agent_end");
+  const runContext = createRunContext();
+
+  await beforeModelResolve?.({ prompt: "Please continue the task." }, runContext);
+  await agentEnd?.(
+    {
+      success: true,
+      messages: [],
+    },
+    {
+      ...runContext,
+      modelProviderId: " ",
+      modelId: "",
+    },
+  );
+
+  assert.equal(launchCalls.length, 1);
+  assert.equal(launchCalls[0]?.candidate.modelProviderId, "openai-codex");
+  assert.equal(launchCalls[0]?.candidate.modelId, "gpt-5.4");
+});
+
 test("continuation launch reuses the last inbound Slack message id and reply context", async () => {
   const { api, hooks, emitTranscriptUpdate } = createMockApi({ enabled: true, debug_logs: true });
   const launchCalls: LaunchContinuationParams[] = [];

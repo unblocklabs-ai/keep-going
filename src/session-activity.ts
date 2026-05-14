@@ -27,6 +27,8 @@ type RunState = {
   startedAt: number;
   endedAt?: number;
   active: boolean;
+  modelProviderId?: string;
+  modelId?: string;
   trigger?: string;
   source?: string;
 };
@@ -44,6 +46,11 @@ type RunQueryResult = {
   active: boolean;
   trigger?: string;
   source?: string;
+};
+
+type RunModelResolution = {
+  modelProviderId?: string;
+  modelId?: string;
 };
 
 type TranscriptUpdate = {
@@ -80,6 +87,8 @@ export class SessionActivityTracker {
   markRunStarted(params: {
     sessionKey?: string;
     runId?: string;
+    modelProviderId?: string;
+    modelId?: string;
     trigger?: string;
     source?: string;
   }): void {
@@ -111,6 +120,8 @@ export class SessionActivityTracker {
       startSequence,
       startedAt: canReuseSequence ? existingState.startedAt : now,
       active: true,
+      modelProviderId: normalizeString(params.modelProviderId) ?? existingState?.modelProviderId,
+      modelId: normalizeString(params.modelId) ?? existingState?.modelId,
       trigger: normalizeString(params.trigger) ?? existingState?.trigger,
       source: normalizeString(params.source) ?? existingState?.source,
     });
@@ -204,6 +215,22 @@ export class SessionActivityTracker {
         trigger: runState.trigger,
         source: runState.source,
       }));
+  }
+
+  getRunModelResolution(runId?: string): RunModelResolution | undefined {
+    this.pruneStaleRunState(Date.now());
+    const key = normalizeString(runId);
+    if (!key) {
+      return undefined;
+    }
+    const runState = this.runStateByRunId.get(key);
+    if (!runState) {
+      return undefined;
+    }
+    return {
+      modelProviderId: runState.modelProviderId,
+      modelId: runState.modelId,
+    };
   }
 
   recordTranscriptUpdate(update: TranscriptUpdate): void {

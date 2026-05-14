@@ -6,6 +6,7 @@ import { launchContinuation, resolveContinuationSessionFile } from "./launcher.j
 import { validateContinuationWithLlm } from "./llm-validator.js";
 import { createKeepGoingLogger } from "./logging.js";
 import { lastAssistantHasSubagentSpawnToolCall } from "./messages.js";
+import { normalizeString } from "./normalize.js";
 import { resolveLlmApiKey } from "./openai-api-key.js";
 import { SessionActivityTracker } from "./session-activity.js";
 import { isSubagentSessionKey, resolveSessionRoute } from "./session-route.js";
@@ -137,7 +138,14 @@ function getRouteSkip(candidate, config, route) {
 }
 function resolveEligibleContinuationContext(runtime, event, ctx, runStartBarrier) {
     const { api, config, logger, dedupe, activeSubagents, sessionActivity } = runtime;
-    const candidate = buildCandidate(event, ctx, config);
+    const trackedModelResolution = sessionActivity.getRunModelResolution(ctx.runId);
+    const modelProviderId = normalizeString(ctx.modelProviderId) ?? trackedModelResolution?.modelProviderId;
+    const modelId = normalizeString(ctx.modelId) ?? trackedModelResolution?.modelId;
+    const candidate = buildCandidate(event, {
+        ...ctx,
+        modelProviderId,
+        modelId,
+    }, config);
     if (!candidate) {
         logSkip(logger, "missing candidate context");
         return undefined;
@@ -564,6 +572,8 @@ export function registerKeepGoingPlugin(api, deps = {}) {
         runtime.sessionActivity.markRunStarted({
             sessionKey: ctx.sessionKey,
             runId: ctx.runId,
+            modelProviderId: ctx.modelProviderId,
+            modelId: ctx.modelId,
             trigger: ctx.trigger,
             source: "before_model_resolve",
         });

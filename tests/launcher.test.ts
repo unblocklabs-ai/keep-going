@@ -176,3 +176,52 @@ test("continuation launch fails when reply dispatch fails", async () => {
     /continuation reply dispatch failed \(tool=0, block=1, final=0\)/,
   );
 });
+
+test("continuation launch aborts when provider or model cannot be resolved", async () => {
+  const params = createLaunchParams();
+  params.candidate.modelProviderId = undefined;
+  params.candidate.modelId = undefined;
+  params.sessionRoute.modelProviderId = undefined;
+  params.sessionRoute.modelId = undefined;
+
+  let embeddedCalled = false;
+  const errors: Array<Record<string, unknown> | undefined> = [];
+  const api = {
+    config: {},
+    runtime: {
+      channel: {
+        reply: {
+          resolveEffectiveMessagesConfig: () => ({ messagePrefix: "", responsePrefix: undefined }),
+          resolveHumanDelayConfig: () => undefined,
+        },
+        outbound: {
+          loadAdapter: async () => undefined,
+        },
+      },
+      agent: {
+        runEmbeddedPiAgent: async () => {
+          embeddedCalled = true;
+          return {} as never;
+        },
+      },
+    },
+  } as unknown as OpenClawPluginApi;
+
+  await assert.rejects(
+    () =>
+      launchContinuation(api, params, {
+        debugEnabled: true,
+        step: () => undefined,
+        warn: () => undefined,
+        error: (_message, meta) => {
+          errors.push(meta);
+        },
+      }),
+    /missing provider\/model for continuation launch/,
+  );
+
+  assert.equal(embeddedCalled, false);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0]?.hasProvider, false);
+  assert.equal(errors[0]?.hasModel, false);
+});

@@ -7,6 +7,7 @@ import {
   KEEP_GOING_SYNTHETIC_WAKE_PREFIX,
 } from "./constants.js";
 import type { KeepGoingLogger } from "./logging.js";
+import { normalizeString } from "./normalize.js";
 import type { LaunchContinuationParams } from "./types.js";
 
 export type SessionFileResolverApi = {
@@ -102,9 +103,27 @@ export async function launchContinuation(
   logger?: KeepGoingLogger,
 ): Promise<{ followUpRunId: string }> {
   const followUpRunId = `${KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX}${crypto.randomUUID()}`;
-  const provider = params.sessionRoute.modelProviderId ?? params.candidate.modelProviderId;
-  const model = params.sessionRoute.modelId ?? params.candidate.modelId;
+  const provider =
+    normalizeString(params.sessionRoute.modelProviderId) ??
+    normalizeString(params.candidate.modelProviderId);
+  const model =
+    normalizeString(params.sessionRoute.modelId) ?? normalizeString(params.candidate.modelId);
   const prompt = buildContinuationWakePrompt(params);
+
+  if (!provider || !model) {
+    logger?.error("continuation wake aborted before launch", {
+      runId: params.candidate.runId,
+      followUpRunId,
+      sessionId: params.candidate.sessionId,
+      sessionKey: params.candidate.sessionKey,
+      sessionFile: params.sessionFile,
+      hasProvider: Boolean(provider),
+      hasModel: Boolean(model),
+      threadId: params.sessionRoute.threadId,
+      channel: params.sessionRoute.channel,
+    });
+    throw new Error("missing provider/model for continuation launch");
+  }
 
   logger?.step("attempting continuation wake", {
     runId: params.candidate.runId,
