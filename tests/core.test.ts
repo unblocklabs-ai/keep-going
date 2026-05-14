@@ -5,6 +5,7 @@ import {
   OPENCLAW_RUNTIME_EVENT_USER_PROMPT,
 } from "../src/constants.js";
 import { resolveKeepGoingConfig } from "../src/config.js";
+import { OneShotDedupe } from "../src/dedupe.js";
 import { buildValidatorPrompt } from "../src/llm-validator.js";
 import {
   resolveContinuationSessionFile,
@@ -114,6 +115,64 @@ test("resolveSessionRoute reconstructs Slack delivery and auth fields", () => {
   assert.equal(route.modelProviderId, "openai-codex");
   assert.equal(route.modelId, "gpt-5.4");
   assert.equal(route.authProfileId, "openai-codex:user@example.com");
+});
+
+test("dedupe keeps same-thread run records until they expire", () => {
+  const dedupe = new OneShotDedupe(undefined, () => 2);
+  const firstKey = dedupe.makeKey({ sessionKey: SLACK_SESSION_KEY, runId: "run-1" });
+  const secondKey = dedupe.makeKey({ sessionKey: SLACK_SESSION_KEY, runId: "run-2" });
+
+  dedupe.record(firstKey, {
+    createdAt: 1,
+    reason: "first continuation",
+    threadId: "1712345678.000100",
+  });
+  dedupe.record(secondKey, {
+    createdAt: 2,
+    reason: "second continuation",
+    threadId: "1712345678.000100",
+  });
+
+  assert.equal(dedupe.has(firstKey), true);
+  assert.equal(dedupe.has(secondKey), true);
+});
+
+test("dedupe prunes expired records when new records are added", () => {
+  const dedupe = new OneShotDedupe(10, () => 12);
+  const expiredKey = dedupe.makeKey({ sessionKey: SLACK_SESSION_KEY, runId: "run-1" });
+  const activeKey = dedupe.makeKey({ sessionKey: SLACK_SESSION_KEY, runId: "run-2" });
+
+  dedupe.record(expiredKey, {
+    createdAt: 1,
+    reason: "expired continuation",
+    threadId: "1712345678.000100",
+  });
+  dedupe.record(activeKey, {
+    createdAt: 12,
+    reason: "active continuation",
+    threadId: "1712345678.000100",
+  });
+
+  assert.equal(dedupe.has(expiredKey), false);
+  assert.equal(dedupe.has(activeKey), true);
+});
+
+test("dedupe ignores expired records when no new record has been added", () => {
+  let now = 1;
+  const dedupe = new OneShotDedupe(10, () => now);
+  const key = dedupe.makeKey({ sessionKey: SLACK_SESSION_KEY, runId: "run-1" });
+
+  dedupe.record(key, {
+    createdAt: now,
+    reason: "expired continuation",
+    threadId: "1712345678.000100",
+  });
+
+  assert.equal(dedupe.has(key), true);
+
+  now = 12;
+
+  assert.equal(dedupe.has(key), false);
 });
 
 test("resolveContinuationSessionFile preserves the existing session transcript file", () => {

@@ -1,4 +1,5 @@
 import { normalizeTranscriptMessages, type TranscriptNormalizationOptions } from "./messages.js";
+import { isConversationMessage, readMessageRole } from "./message-role.js";
 import { normalizeString } from "./normalize.js";
 import { normalizeOptionalTrackingSessionKey } from "./session-key.js";
 import type { TranscriptMessage } from "./transcript-types.js";
@@ -27,6 +28,8 @@ type RunState = {
   startedAt: number;
   endedAt?: number;
   active: boolean;
+  modelProviderId?: string;
+  modelId?: string;
   trigger?: string;
   source?: string;
 };
@@ -44,6 +47,11 @@ type RunQueryResult = {
   active: boolean;
   trigger?: string;
   source?: string;
+};
+
+type RunModelResolution = {
+  modelProviderId?: string;
+  modelId?: string;
 };
 
 type TranscriptUpdate = {
@@ -80,6 +88,8 @@ export class SessionActivityTracker {
   markRunStarted(params: {
     sessionKey?: string;
     runId?: string;
+    modelProviderId?: string;
+    modelId?: string;
     trigger?: string;
     source?: string;
   }): void {
@@ -111,6 +121,8 @@ export class SessionActivityTracker {
       startSequence,
       startedAt: canReuseSequence ? existingState.startedAt : now,
       active: true,
+      modelProviderId: normalizeString(params.modelProviderId) ?? existingState?.modelProviderId,
+      modelId: normalizeString(params.modelId) ?? existingState?.modelId,
       trigger: normalizeString(params.trigger) ?? existingState?.trigger,
       source: normalizeString(params.source) ?? existingState?.source,
     });
@@ -206,6 +218,22 @@ export class SessionActivityTracker {
       }));
   }
 
+  getRunModelResolution(runId?: string): RunModelResolution | undefined {
+    this.pruneStaleRunState(Date.now());
+    const key = normalizeString(runId);
+    if (!key) {
+      return undefined;
+    }
+    const runState = this.runStateByRunId.get(key);
+    if (!runState) {
+      return undefined;
+    }
+    return {
+      modelProviderId: runState.modelProviderId,
+      modelId: runState.modelId,
+    };
+  }
+
   recordTranscriptUpdate(update: TranscriptUpdate): void {
     this.pruneStaleRunState(Date.now());
     const sessionKey = normalizeSessionKey(update.sessionKey);
@@ -243,7 +271,7 @@ export class SessionActivityTracker {
       this.transcriptBySessionKey.set(sessionKey, { messageId });
     }
 
-    const role = getMessageRole(update.message);
+    const role = readMessageRole(update.message);
     if (role === "assistant") {
       const assistantSnapshot: AssistantMessageSnapshot = { messageId };
       this.lastAssistantMessageBySessionFile.set(sessionFile, assistantSnapshot);
@@ -422,23 +450,6 @@ export class SessionActivityTracker {
     }
     this.latestRunStartSequenceBySessionKey.delete(sessionKey);
   }
-}
-
-function isConversationMessage(message: unknown): boolean {
-  if (!message || typeof message !== "object") {
-    return false;
-  }
-  const role = (message as { role?: unknown }).role;
-  return role === "user" || role === "assistant";
-}
-
-function getMessageRole(message: unknown): string | undefined {
-  if (!message || typeof message !== "object") {
-    return undefined;
-  }
-
-  const role = (message as { role?: unknown }).role;
-  return typeof role === "string" ? role : undefined;
 }
 
 function normalizeSessionKey(value?: string): string | undefined {

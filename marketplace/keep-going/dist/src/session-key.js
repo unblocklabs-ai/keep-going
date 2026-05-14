@@ -7,7 +7,7 @@ export function resolveBaseSessionKey(sessionKey) {
     }
     return sessionKey.slice(0, markerIndex);
 }
-export function normalizeTrackingSessionKey(sessionKey) {
+function normalizeTrackingSessionKey(sessionKey) {
     return resolveBaseSessionKey(sessionKey.trim());
 }
 export function normalizeOptionalTrackingSessionKey(sessionKey) {

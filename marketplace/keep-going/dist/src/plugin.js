@@ -2,10 +2,12 @@ import { ActiveSubagentTracker } from "./active-subagents.js";
 import { CONTINUATION_REACTION_EMOJI, resolveKeepGoingConfig } from "./config.js";
 import { KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX } from "./constants.js";
 import { OneShotDedupe } from "./dedupe.js";
-import { launchContinuation, resolveContinuationSessionFile } from "./launcher.js";
+import { launchContinuation, resolveContinuationModelRoute, resolveContinuationSessionFile, } from "./launcher.js";
 import { validateContinuationWithLlm } from "./llm-validator.js";
 import { createKeepGoingLogger } from "./logging.js";
 import { lastAssistantHasSubagentSpawnToolCall } from "./messages.js";
+import { readMessageRole } from "./message-role.js";
+import { normalizeString } from "./normalize.js";
 import { resolveLlmApiKey } from "./openai-api-key.js";
 import { SessionActivityTracker } from "./session-activity.js";
 import { isSubagentSessionKey, resolveSessionRoute } from "./session-route.js";
@@ -24,7 +26,7 @@ function normalizeTimeoutMs(api, configuredTimeoutMs) {
         overrideMs: configuredTimeoutMs,
     });
 }
-function buildCandidate(event, ctx, config) {
+function buildCandidate(event, ctx) {
     if (!ctx.runId || !ctx.sessionId || !ctx.sessionKey || !ctx.workspaceDir) {
         return undefined;
     }
@@ -50,13 +52,6 @@ function logSkip(logger, reason, metadata) {
 }
 function isSlackMessageTs(value) {
     return typeof value === "string" && /^\d{10}\.\d{6}$/.test(value);
-}
-function getMessageRole(message) {
-    if (!message || typeof message !== "object") {
-        return undefined;
-    }
-    const role = message.role;
-    return typeof role === "string" ? role : undefined;
 }
 function isResolvedSessionRoute(route) {
     return route.lookupStatus === "ok";
@@ -137,7 +132,14 @@ function getRouteSkip(candidate, config, route) {
 }
 function resolveEligibleContinuationContext(runtime, event, ctx, runStartBarrier) {
     const { api, config, logger, dedupe, activeSubagents, sessionActivity } = runtime;
-    const candidate = buildCandidate(event, ctx, config);
+    const trackedModelResolution = sessionActivity.getRunModelResolution(ctx.runId);
+    const modelProviderId = normalizeString(ctx.modelProviderId) ?? trackedModelResolution?.modelProviderId;
+    const modelId = normalizeString(ctx.modelId) ?? trackedModelResolution?.modelId;
+    const candidate = buildCandidate(event, {
+        ...ctx,
+        modelProviderId,
+        modelId,
+    });
     if (!candidate) {
         logSkip(logger, "missing candidate context");
         return undefined;
@@ -283,7 +285,7 @@ async function evaluateDecision(runtime, candidate) {
     }
 }
 function shouldAbortBeforeLaunch(runtime, context, evaluated) {
-    const { logger, sessionActivity } = runtime;
+    const { logger, sessionActivity, activeSubagents } = runtime;
     const { candidate, route, sessionFile, transcriptSnapshot, runStartBarrier } = context;
     const { decision, validatorModel } = evaluated;
     if (!decision.continue) {
@@ -320,6 +322,14 @@ function shouldAbortBeforeLaunch(runtime, context, evaluated) {
         });
         return true;
     }
+    if (activeSubagents.hasActiveChildren(candidate.sessionKey)) {
+        logSkip(logger, "subagent still in flight", {
+            runId: candidate.runId,
+            sessionKey: candidate.sessionKey,
+            activeChildSessionKeys: activeSubagents.getActiveChildSessionKeys(candidate.sessionKey),
+        });
+        return true;
+    }
     return false;
 }
 async function sendContinuationReaction(runtime, context) {
@@ -332,7 +342,7 @@ async function sendContinuationReaction(runtime, context) {
             threadId: route.threadId,
             skipReason: "disabled",
         });
-        return { status: "skipped", reason: "disabled", messageId: reactionMessageId };
+        return { status: "skipped", reason: "disabled" };
     }
     if (!route.currentChannelId || !reactionMessageId) {
         logger.error("continuation reaction skipped", {
@@ -347,7 +357,6 @@ async function sendContinuationReaction(runtime, context) {
         return {
             status: "skipped",
             reason: "missing-slack-message-route",
-            messageId: reactionMessageId,
         };
     }
     if (!isSlackMessageTs(reactionMessageId)) {
@@ -363,7 +372,6 @@ async function sendContinuationReaction(runtime, context) {
         return {
             status: "skipped",
             reason: "assistant-message-id-is-not-slack-ts",
-            messageId: reactionMessageId,
         };
     }
     try {
@@ -382,7 +390,7 @@ async function sendContinuationReaction(runtime, context) {
             messageTs: reactionMessageId,
             emoji: CONTINUATION_REACTION_EMOJI,
         });
-        return { status: "sent", messageTs: reactionMessageId };
+        return { status: "sent" };
     }
     catch (error) {
         const slackDetails = error instanceof SlackReactionError ? error.details : {};
@@ -400,8 +408,6 @@ async function sendContinuationReaction(runtime, context) {
         return {
             status: "failed",
             reason: "slack-reaction-api-failed",
-            messageTs: reactionMessageId,
-            error,
         };
     }
 }
@@ -444,6 +450,24 @@ async function launchEligibleContinuation(runtime, context, evaluated) {
     const { config, logger, dedupe, api, deps } = runtime;
     const { candidate, dedupeKey, route, wakeContext, sessionFile } = context;
     const { decision, validatorModel } = evaluated;
+    const modelRoute = resolveContinuationModelRoute({
+        candidate,
+        sessionRoute: route,
+    });
+    if (!modelRoute.provider || !modelRoute.model) {
+        logger.error("continuation wake aborted before launch", {
+            runId: candidate.runId,
+            sessionId: candidate.sessionId,
+            sessionKey: candidate.sessionKey,
+            sessionFile,
+            hasProvider: Boolean(modelRoute.provider),
+            hasModel: Boolean(modelRoute.model),
+            threadId: route.threadId,
+            channel: route.channel,
+            ...(validatorModel ? { validatorModel } : {}),
+        });
+        return;
+    }
     dedupe.record(dedupeKey, {
         createdAt: Date.now(),
         reason: decision.reason,
@@ -479,7 +503,6 @@ async function launchEligibleContinuation(runtime, context, evaluated) {
             sessionFile,
             timeoutMs: normalizeTimeoutMs(api, config.timeoutMs),
         }, logger);
-        dedupe.setLaunchedFollowUpRunId(dedupeKey, launchResult.followUpRunId);
         logger.step("launched continuation", {
             runId: candidate.runId,
             followUpRunId: launchResult.followUpRunId,
@@ -532,6 +555,11 @@ export function registerKeepGoingPlugin(api, deps = {}) {
                 hasApiKeyRef: Boolean(config.validator.llm.apiKeyRef),
                 hasInlineApiKey: Boolean(config.validator.llm.apiKey),
             });
+        }).catch((error) => {
+            runtime.logger.warn("validator API key probe failed", {
+                validatorModel: config.validator.llm.model,
+                error: error instanceof Error ? error.message : String(error),
+            });
         });
     }
     api.runtime.events.onSessionTranscriptUpdate((update) => {
@@ -540,7 +568,7 @@ export function registerKeepGoingPlugin(api, deps = {}) {
             sessionKey: update.sessionKey,
             sessionFile: update.sessionFile,
             messageId: update.messageId,
-            role: getMessageRole(update.message),
+            role: readMessageRole(update.message),
         });
     });
     api.runtime.events.onAgentEvent((event) => {
@@ -564,6 +592,8 @@ export function registerKeepGoingPlugin(api, deps = {}) {
         runtime.sessionActivity.markRunStarted({
             sessionKey: ctx.sessionKey,
             runId: ctx.runId,
+            modelProviderId: ctx.modelProviderId,
+            modelId: ctx.modelId,
             trigger: ctx.trigger,
             source: "before_model_resolve",
         });

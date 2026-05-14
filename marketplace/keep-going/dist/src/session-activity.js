@@ -1,4 +1,5 @@
 import { normalizeTranscriptMessages } from "./messages.js";
+import { isConversationMessage, readMessageRole } from "./message-role.js";
 import { normalizeString } from "./normalize.js";
 import { normalizeOptionalTrackingSessionKey } from "./session-key.js";
 const STALE_RUN_STATE_MAX_AGE_MS = 5 * 60 * 1000;
@@ -49,6 +50,8 @@ export class SessionActivityTracker {
             startSequence,
             startedAt: canReuseSequence ? existingState.startedAt : now,
             active: true,
+            modelProviderId: normalizeString(params.modelProviderId) ?? existingState?.modelProviderId,
+            modelId: normalizeString(params.modelId) ?? existingState?.modelId,
             trigger: normalizeString(params.trigger) ?? existingState?.trigger,
             source: normalizeString(params.source) ?? existingState?.source,
         });
@@ -128,6 +131,21 @@ export class SessionActivityTracker {
             source: runState.source,
         }));
     }
+    getRunModelResolution(runId) {
+        this.pruneStaleRunState(Date.now());
+        const key = normalizeString(runId);
+        if (!key) {
+            return undefined;
+        }
+        const runState = this.runStateByRunId.get(key);
+        if (!runState) {
+            return undefined;
+        }
+        return {
+            modelProviderId: runState.modelProviderId,
+            modelId: runState.modelId,
+        };
+    }
     recordTranscriptUpdate(update) {
         this.pruneStaleRunState(Date.now());
         const sessionKey = normalizeSessionKey(update.sessionKey);
@@ -157,7 +175,7 @@ export class SessionActivityTracker {
         if (sessionKey) {
             this.transcriptBySessionKey.set(sessionKey, { messageId });
         }
-        const role = getMessageRole(update.message);
+        const role = readMessageRole(update.message);
         if (role === "assistant") {
             const assistantSnapshot = { messageId };
             this.lastAssistantMessageBySessionFile.set(sessionFile, assistantSnapshot);
@@ -305,20 +323,6 @@ export class SessionActivityTracker {
         }
         this.latestRunStartSequenceBySessionKey.delete(sessionKey);
     }
-}
-function isConversationMessage(message) {
-    if (!message || typeof message !== "object") {
-        return false;
-    }
-    const role = message.role;
-    return role === "user" || role === "assistant";
-}
-function getMessageRole(message) {
-    if (!message || typeof message !== "object") {
-        return undefined;
-    }
-    const role = message.role;
-    return typeof role === "string" ? role : undefined;
 }
 function normalizeSessionKey(value) {
     return normalizeOptionalTrackingSessionKey(normalizeString(value));

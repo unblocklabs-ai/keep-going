@@ -1,4 +1,4 @@
-import { normalizeString } from "./normalize.js";
+import { clipText, normalizeString } from "./normalize.js";
 import type { KeepGoingLogger } from "./logging.js";
 import type { OpenAiLlmCallConfig } from "./types.js";
 
@@ -29,13 +29,6 @@ type ResponsesJsonSchemaResult = {
   outputText?: string;
   refusal?: string;
 };
-
-function clipText(value: string, maxChars: number): string {
-  if (value.length <= maxChars) {
-    return value;
-  }
-  return value.slice(0, Math.max(0, maxChars - 1)).trimEnd() + "…";
-}
 
 function extractOutputText(responseBody: unknown): string | undefined {
   if (!responseBody || typeof responseBody !== "object") {
