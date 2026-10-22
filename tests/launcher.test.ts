@@ -35,6 +35,10 @@ function createLaunchParams(): LaunchContinuationParams {
       threadId: "1712345678.000100",
       currentChannelId: "C123",
       replyToMode: "all",
+      storePath: "/virtual/sessions.sqlite",
+      modelProviderId: "route-provider",
+      modelId: "route-model",
+      authProfileId: "route-auth",
     },
     wakeContext: {
       currentMessageId: "1776309280.777379",
@@ -42,7 +46,6 @@ function createLaunchParams(): LaunchContinuationParams {
       currentThreadTs: "1712345678.000100",
       replyToMode: "all",
     },
-    sessionFile: "/virtual/session.jsonl",
     timeoutMs: 60_000,
   };
 }
@@ -79,7 +82,7 @@ test("plugin-started continuation replies route to the stored Slack thread with 
         },
       },
       agent: {
-        runEmbeddedPiAgent: async (runParams: Record<string, unknown>) => {
+        runEmbeddedAgent: async (runParams: Record<string, unknown>) => {
           embeddedParams = runParams;
           assert.equal(typeof runParams.prompt, "string");
           assert.match(String(runParams.prompt), new RegExp(`^\\${KEEP_GOING_SYNTHETIC_WAKE_PREFIX}`));
@@ -124,6 +127,22 @@ test("plugin-started continuation replies route to the stored Slack thread with 
   await launchContinuation(api, params);
 
   assert.ok(embeddedParams);
+  assert.equal(embeddedParams.agentId, "main");
+  assert.equal(embeddedParams.sessionId, params.candidate.sessionId);
+  assert.equal(embeddedParams.sessionKey, params.candidate.sessionKey);
+  assert.deepEqual(embeddedParams.sessionTarget, {
+    agentId: "main",
+    sessionId: params.candidate.sessionId,
+    sessionKey: params.candidate.sessionKey,
+    storePath: "/virtual/sessions.sqlite",
+  });
+  assert.equal(embeddedParams.sessionFile, undefined);
+  assert.equal(embeddedParams.provider, "route-provider");
+  assert.equal(embeddedParams.model, "route-model");
+  assert.equal(embeddedParams.authProfileId, "route-auth");
+  assert.equal(embeddedParams.currentMessageId, params.wakeContext.currentMessageId);
+  assert.equal(embeddedParams.messageThreadId, params.sessionRoute.threadId);
+  assert.equal(embeddedParams.agentAccountId, "default");
   assert.equal(deliveredPayloads.length, 1);
   assert.equal(deliveredPayloads[0]?.to, "channel:C123");
   assert.equal(deliveredPayloads[0]?.threadId, "1712345678.000100");
@@ -160,7 +179,7 @@ test("continuation launch fails when reply dispatch fails", async () => {
         },
       },
       agent: {
-        runEmbeddedPiAgent: async (runParams: Record<string, unknown>) => {
+        runEmbeddedAgent: async (runParams: Record<string, unknown>) => {
           await (runParams.onBlockReply as (payload: { text: string }) => Promise<void>)({
             text: "Internal reply that never lands",
           });

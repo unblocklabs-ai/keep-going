@@ -130,7 +130,7 @@ export class SessionActivityTracker {
     }
     recordTranscriptUpdate(update) {
         this.pruneStaleRunState(Date.now());
-        const sessionKey = normalizeSessionKey(update.sessionKey);
+        const sessionKey = normalizeSessionKey(update.target?.sessionKey ?? update.sessionKey);
         if (sessionKey && update.message !== undefined) {
             const normalizedMessages = normalizeTranscriptMessages([update.message], this.transcriptNormalizationOptions);
             if (normalizedMessages.length > 0) {
@@ -150,17 +150,19 @@ export class SessionActivityTracker {
         }
         const sessionFile = normalizeString(update.sessionFile);
         const messageId = normalizeString(update.messageId);
-        if (!sessionFile || !messageId) {
+        if (!messageId) {
             return;
         }
-        this.transcriptBySessionFile.set(sessionFile, { messageId });
+        if (sessionFile)
+            this.transcriptBySessionFile.set(sessionFile, { messageId });
         if (sessionKey) {
             this.transcriptBySessionKey.set(sessionKey, { messageId });
         }
         const role = getMessageRole(update.message);
         if (role === "assistant") {
             const assistantSnapshot = { messageId };
-            this.lastAssistantMessageBySessionFile.set(sessionFile, assistantSnapshot);
+            if (sessionFile)
+                this.lastAssistantMessageBySessionFile.set(sessionFile, assistantSnapshot);
             if (sessionKey) {
                 this.lastAssistantMessageBySessionKey.set(sessionKey, assistantSnapshot);
             }
@@ -170,7 +172,8 @@ export class SessionActivityTracker {
             return;
         }
         const userSnapshot = { messageId };
-        this.lastUserMessageBySessionFile.set(sessionFile, userSnapshot);
+        if (sessionFile)
+            this.lastUserMessageBySessionFile.set(sessionFile, userSnapshot);
         if (sessionKey) {
             this.lastUserMessageBySessionKey.set(sessionKey, userSnapshot);
         }

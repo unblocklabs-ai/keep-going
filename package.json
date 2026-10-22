@@ -44,9 +44,9 @@
     ".claude-plugin/marketplace.json"
   ],
   "devDependencies": {
-    "@types/node": "^24.6.0",
     "@openclaw/plugin-inspector": "^0.3.10",
-    "openclaw": "2026.5.3",
+    "@types/node": "^24.6.0",
+    "openclaw": "2026.10.5",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   },
@@ -55,21 +55,27 @@
       "./dist/index.js"
     ],
     "compat": {
-      "pluginApi": ">=2026.5.3",
-      "minGatewayVersion": "2026.5.3"
+      "pluginApi": ">=2026.10.5",
+      "minGatewayVersion": "2026.10.5"
     },
     "build": {
-      "openclawVersion": "2026.5.3",
-      "pluginSdkVersion": "2026.5.3"
+      "openclawVersion": "2026.10.5",
+      "pluginSdkVersion": "2026.10.5"
     },
     "install": {
       "npmSpec": "@unblocklabs/openclaw-keep-going",
       "defaultChoice": "npm",
-      "minHostVersion": ">=2026.5.3"
+      "minHostVersion": ">=2026.10.5"
     },
     "release": {
       "publishToClawHub": false,
       "publishToNpm": true
     }
+  },
+  "overrides": {
+    "follow-redirects": "^1.16.1",
+    "hono": "^4.13.11",
+    "markdown-it": "^14.3.3",
+    "@modelcontextprotocol/sdk": "^1.32.0"
   }
 }

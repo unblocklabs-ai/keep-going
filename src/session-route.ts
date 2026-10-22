@@ -4,7 +4,6 @@ import { resolveBaseSessionKey } from "./session-key.js";
 import type { SessionRoute, SlackReplyToMode } from "./types.js";
 
 type SessionRouteEntry = {
-  sessionFile?: string;
   spawnedBy?: string;
   modelProvider?: string;
   model?: string;
@@ -30,7 +29,12 @@ export type SessionRouteApi = {
     agent: {
       session: {
         resolveStorePath: OpenClawPluginApi["runtime"]["agent"]["session"]["resolveStorePath"];
-        loadSessionStore: (storePath: string) => Record<string, SessionRouteEntry>;
+        getSessionEntryAsync: (params: {
+          agentId?: string;
+          storePath: string;
+          sessionKey: string;
+          readConsistency: "latest";
+        }) => Promise<SessionRouteEntry | undefined>;
       };
     };
   };
@@ -59,8 +63,7 @@ function resolveSlackReplyToMode(
   if (isDirectMessage) {
     return (
       slackConfig.replyToModeByChatType?.direct ??
-      slackConfig.replyToMode ??
-      slackConfig.dm?.replyToMode
+      slackConfig.replyToMode
     );
   }
 
@@ -89,7 +92,6 @@ function buildSessionRouteFields(
     currentChannelId: channel === "slack" ? deriveSlackChannelId(to) : undefined,
     replyToMode: channel === "slack" ? resolveSlackReplyToMode(config, to) : undefined,
     spawnedBy: normalizeString(entry.spawnedBy),
-    sessionFile: normalizeString(entry.sessionFile),
     modelProviderId: normalizeString(entry.modelProvider),
     modelId: normalizeString(entry.model),
     authProfileId: normalizeString(entry.authProfileOverride),
@@ -100,25 +102,31 @@ export function isSubagentSessionKey(sessionKey: string): boolean {
   return sessionKey.includes(":subagent:");
 }
 
-export function resolveSessionRoute(
+export async function resolveSessionRoute(
   api: SessionRouteApi,
   params: { agentId?: string; sessionKey: string },
-): SessionRoute {
+): Promise<SessionRoute> {
   try {
     const storePath = api.runtime.agent.session.resolveStorePath(api.config.session?.store, {
       agentId: params.agentId,
     });
-    const store = api.runtime.agent.session.loadSessionStore(storePath);
+    const readEntry = (sessionKey: string) => api.runtime.agent.session.getSessionEntryAsync({
+      agentId: params.agentId,
+      storePath,
+      sessionKey,
+      readConsistency: "latest",
+    });
     const baseSessionKey = resolveBaseSessionKey(params.sessionKey);
     const entry =
-      store[params.sessionKey] ??
-      (baseSessionKey !== params.sessionKey ? store[baseSessionKey] : undefined);
+      (await readEntry(params.sessionKey)) ??
+      (baseSessionKey !== params.sessionKey ? await readEntry(baseSessionKey) : undefined);
     if (!entry) {
       return { lookupStatus: "missing-entry", isSlack: false };
     }
 
     return {
       lookupStatus: "ok",
+      storePath,
       ...buildSessionRouteFields(api.config, entry),
     };
   } catch (error) {

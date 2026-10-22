@@ -7,10 +7,6 @@ import {
 import { resolveKeepGoingConfig } from "../src/config.js";
 import { buildValidatorPrompt } from "../src/llm-validator.js";
 import {
-  resolveContinuationSessionFile,
-  type SessionFileResolverApi,
-} from "../src/launcher.js";
-import {
   extractInitialSlackThreadHistoryMessages,
   extractLastAssistantHumanFacingText,
   extractLastAssistantText,
@@ -31,11 +27,9 @@ const SLACK_SESSION_KEY = "agent:main:slack:channel:c123:thread:1712345678.00010
 const SLACK_SESSION_FILE =
   "/Users/example/.openclaw/agents/main/sessions/session-1-topic-1712345678.000100.jsonl";
 
-type SessionStore = ReturnType<
-  SessionRouteApi["runtime"]["agent"]["session"]["loadSessionStore"]
->;
+type SessionStore = Record<string, NonNullable<Awaited<ReturnType<SessionRouteApi["runtime"]["agent"]["session"]["getSessionEntryAsync"]>>>>;
 
-function createMockApi(store: SessionStore): SessionRouteApi & SessionFileResolverApi {
+function createMockApi(store: SessionStore): SessionRouteApi {
   return {
     config: {
       session: {
@@ -51,9 +45,7 @@ function createMockApi(store: SessionStore): SessionRouteApi & SessionFileResolv
       agent: {
         session: {
           resolveStorePath: () => "/virtual/sessions.json",
-          loadSessionStore: () => store,
-          resolveSessionFilePath: (sessionId: string, options?: { sessionFile?: string }) =>
-            options?.sessionFile ?? `/virtual/${sessionId}.jsonl`,
+          getSessionEntryAsync: async ({ sessionKey }) => store[sessionKey],
         },
       },
     },
@@ -81,7 +73,7 @@ function createValidatorConfig(
   return createDefaultOpenAiValidatorConfig(overrides);
 }
 
-test("resolveSessionRoute reconstructs Slack delivery and auth fields", () => {
+test("resolveSessionRoute reconstructs Slack delivery and auth fields", async () => {
   const store = {
     [SLACK_SESSION_KEY]: {
       sessionFile: SLACK_SESSION_FILE,
@@ -97,7 +89,7 @@ test("resolveSessionRoute reconstructs Slack delivery and auth fields", () => {
     },
   };
 
-  const route = resolveSessionRoute(createMockApi(store), {
+  const route = await resolveSessionRoute(createMockApi(store), {
     agentId: "main",
     sessionKey: SLACK_SESSION_KEY,
   });
@@ -110,36 +102,10 @@ test("resolveSessionRoute reconstructs Slack delivery and auth fields", () => {
   assert.equal(route.threadId, "1712345678.000100");
   assert.equal(route.currentChannelId, "C123");
   assert.equal(route.replyToMode, "first");
-  assert.equal(route.sessionFile, SLACK_SESSION_FILE);
+  assert.equal(route.storePath, "/virtual/sessions.json");
   assert.equal(route.modelProviderId, "openai-codex");
   assert.equal(route.modelId, "gpt-5.4");
   assert.equal(route.authProfileId, "openai-codex:user@example.com");
-});
-
-test("resolveContinuationSessionFile preserves the existing session transcript file", () => {
-  const route = resolveSessionRoute(
-    createMockApi({
-      [SLACK_SESSION_KEY]: {
-        sessionFile: SLACK_SESSION_FILE,
-        deliveryContext: {
-          channel: "slack",
-        },
-      },
-    }),
-    {
-      agentId: "main",
-      sessionKey: SLACK_SESSION_KEY,
-    },
-  );
-
-  assert.equal(route.lookupStatus, "ok");
-
-  const sessionFile = resolveContinuationSessionFile(createMockApi({}), {
-    candidate: createCandidate([]),
-    sessionRoute: route,
-  });
-
-  assert.equal(sessionFile, SLACK_SESSION_FILE);
 });
 
 test("shared default validator config matches runtime plugin defaults", () => {
@@ -865,4 +831,55 @@ test("extractInitialSlackThreadHistoryMessages returns the first embedded thread
   ]);
 
   assert.deepEqual(history, [{ type: "assistant", msg: "Initial assistant post" }]);
+});
+
+
+test("session route reads the selected store with latest consistency and falls back only to its base key", async () => {
+  const api = createMockApi({});
+  const reads: string[] = [];
+  api.runtime.agent.session.getSessionEntryAsync = async (params) => {
+    assert.equal(params.agentId, "main");
+    assert.equal(params.storePath, "/virtual/sessions.json");
+    assert.equal(params.readConsistency, "latest");
+    reads.push(params.sessionKey);
+    return params.sessionKey === "agent:main:slack:channel:c123"
+      ? { lastChannel: "slack", lastTo: "user:U123", lastThreadId: 123 }
+      : undefined;
+  };
+  api.config.channels = { slack: { replyToMode: "first", replyToModeByChatType: { direct: "all" } } };
+  const route = await resolveSessionRoute(api, { agentId: "main", sessionKey: SLACK_SESSION_KEY });
+  assert.deepEqual(reads, [SLACK_SESSION_KEY, "agent:main:slack:channel:c123"]);
+  assert.equal(route.lookupStatus, "ok");
+  assert.equal(route.to, "user:U123");
+  assert.equal(route.threadId, "123");
+  assert.equal(route.replyToMode, "all");
+});
+
+test("session route fails closed on missing entries and read failures", async () => {
+  const api = createMockApi({});
+  assert.deepEqual(await resolveSessionRoute(api, { sessionKey: SLACK_SESSION_KEY }), {
+    lookupStatus: "missing-entry", isSlack: false,
+  });
+  api.runtime.agent.session.getSessionEntryAsync = async () => { throw new Error("store unavailable"); };
+  assert.deepEqual(await resolveSessionRoute(api, { sessionKey: SLACK_SESSION_KEY }), {
+    lookupStatus: "error", isSlack: false, error: "store unavailable",
+  });
+});
+
+test("identity-only transcript events preserve snapshots, message ids and run history", () => {
+  const tracker = new SessionActivityTracker();
+  const target = { agentId: "main", sessionId: SLACK_SESSION_ID, sessionKey: SLACK_SESSION_KEY };
+  tracker.markRunStarted({ sessionKey: SLACK_SESSION_KEY, runId: "identity-run" });
+  const before = tracker.captureSnapshot({ sessionKey: SLACK_SESSION_KEY });
+  tracker.recordTranscriptUpdate({ target, messageId: "user-1", message: { role: "user", content: "Continue" } });
+  assert.equal(tracker.hasTranscriptChanged(before, { sessionKey: SLACK_SESSION_KEY }), true);
+  assert.equal(tracker.getLatestUserMessageId({ sessionKey: SLACK_SESSION_KEY }), "user-1");
+  const afterUser = tracker.captureSnapshot({ sessionKey: SLACK_SESSION_KEY });
+  tracker.recordTranscriptUpdate({ target, messageId: "tool-1", message: { role: "toolResult", content: "ok" } });
+  assert.equal(tracker.hasTranscriptChanged(afterUser, { sessionKey: SLACK_SESSION_KEY }), false);
+  tracker.recordTranscriptUpdate({ target, messageId: "assistant-1", message: { role: "assistant", content: "Done" } });
+  assert.equal(tracker.hasTranscriptChanged(afterUser, { sessionKey: SLACK_SESSION_KEY }), true);
+  assert.equal(tracker.getLatestAssistantMessageId({ sessionKey: SLACK_SESSION_KEY }), "assistant-1");
+  assert.equal(tracker.getRunTranscriptMessages("identity-run").some((message) => message.text === "Done"), true);
+  assert.deepEqual(tracker.getSessionTranscriptMessages("agent:other:slack:channel:private"), []);
 });

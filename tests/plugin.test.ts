@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { OpenClawPluginApi, RuntimeLogger } from "openclaw/plugin-sdk";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
+import type { RuntimeLogger } from "openclaw/plugin-sdk/core";
 import { KEEP_GOING_SYNTHETIC_WAKE_PREFIX } from "../src/constants.js";
 import { launchContinuation } from "../src/launcher.js";
 import { registerKeepGoingPlugin } from "../src/plugin.js";
@@ -15,7 +16,7 @@ type MockLoggerCall = {
 };
 
 type MockApiOptions = {
-  runEmbeddedPiAgent?: (params: Record<string, unknown>) => Promise<unknown>;
+  runEmbeddedAgent?: (params: Record<string, unknown>) => Promise<unknown>;
   loadOutboundAdapter?: (channelId: string) => Promise<{
     sendPayload?: (ctx: Record<string, unknown>) => Promise<unknown>;
     sendText?: (ctx: Record<string, unknown>) => Promise<unknown>;
@@ -30,7 +31,8 @@ function createMockApi(
   const hooks = new Map<string, (...args: unknown[]) => unknown>();
   let onTranscriptUpdate:
     | ((update: {
-        sessionFile: string;
+        sessionFile?: string;
+      target?: { sessionKey: string; agentId: string; sessionId: string };
         sessionKey?: string;
         message?: unknown;
         messageId?: string;
@@ -103,7 +105,8 @@ function createMockApi(
       events: {
         onSessionTranscriptUpdate: (
           handler: (update: {
-            sessionFile: string;
+            sessionFile?: string;
+            target?: { sessionKey: string; agentId: string; sessionId: string };
             sessionKey?: string;
             message?: unknown;
             messageId?: string;
@@ -126,13 +129,13 @@ function createMockApi(
         resolveAgentTimeoutMs: () => 60_000,
         session: {
           resolveStorePath: () => "/virtual/sessions.json",
-          loadSessionStore: () => sessionStore,
-          resolveSessionFilePath: () => SESSION_FILE,
+          getSessionEntryAsync: async ({ sessionKey }: { sessionKey: string }) =>
+            sessionKey === SESSION_KEY ? sessionStore[SESSION_KEY] : undefined,
         },
-        runEmbeddedPiAgent: options.runEmbeddedPiAgent
-          ? async (params: Record<string, unknown>) => await options.runEmbeddedPiAgent?.(params)
+        runEmbeddedAgent: options.runEmbeddedAgent
+          ? async (params: Record<string, unknown>) => await options.runEmbeddedAgent?.(params)
           : async () => {
-              throw new Error("runEmbeddedPiAgent should not be called in this test");
+              throw new Error("runEmbeddedAgent should not be called in this test");
             },
       },
     },
@@ -146,12 +149,17 @@ function createMockApi(
     hooks,
     logs,
     emitTranscriptUpdate: (update: {
-      sessionFile: string;
+      sessionFile?: string;
+      target?: { sessionKey: string; agentId: string; sessionId: string };
       sessionKey?: string;
       message?: unknown;
       messageId?: string;
     }) => {
-      onTranscriptUpdate?.(update);
+      onTranscriptUpdate?.({
+        target: { agentId: "main", sessionId: "session-1", sessionKey: update.sessionKey ?? SESSION_KEY },
+        message: update.message,
+        messageId: update.messageId,
+      });
     },
     emitAgentEvent: (event: {
       stream?: string;
@@ -330,7 +338,7 @@ test("plugin-triggered continuation flow dispatches assistant replies to the sto
           },
         };
       },
-      runEmbeddedPiAgent: async (params: Record<string, unknown>) => {
+      runEmbeddedAgent: async (params: Record<string, unknown>) => {
         embeddedPrompt = typeof params.prompt === "string" ? params.prompt : undefined;
         embeddedTranscriptPrompt = params.transcriptPrompt;
         await (params.onBlockReply as (payload: { text: string }) => Promise<void>)({
@@ -1053,3 +1061,37 @@ test("errors still log with prefix when debug_logs is disabled", async () => {
   assert.ok(logs.error[0]?.message.startsWith("Keep-Going Plugin: "));
   assert.equal(logs.error[0]?.message, "Keep-Going Plugin: llm validator failed");
 });
+
+
+for (const updatePhase of ["route lookup", "validation"] as const) {
+  test(`identity-only transcript changes during ${updatePhase} abort continuation`, async () => {
+    const { api, hooks, emitTranscriptUpdate, logs } = createMockApi({ enabled: true, debug_logs: true });
+    let launches = 0;
+    const update = () => emitTranscriptUpdate({
+      sessionKey: SESSION_KEY,
+      messageId: "new-user-message",
+      message: { role: "user", content: "Stop, the task changed." },
+    });
+    if (updatePhase === "route lookup") {
+      const readEntry = api.runtime.agent.session.getSessionEntryAsync;
+      api.runtime.agent.session.getSessionEntryAsync = async (params) => {
+        update();
+        return await readEntry(params);
+      };
+    }
+    registerKeepGoingPlugin(api, {
+      validateContinuationWithLlm: async () => {
+        if (updatePhase === "validation") update();
+        return { continue: true, reason: "unfinished work remains", validatorModel: "test" };
+      },
+      launchContinuation: async () => {
+        launches += 1;
+        return { followUpRunId: "must-not-launch" };
+      },
+    });
+    await hooks.get("before_model_resolve")?.({ prompt: "Task" }, createRunContext());
+    await hooks.get("agent_end")?.({ success: true, messages: [] }, createRunContext());
+    assert.equal(launches, 0);
+    assert.equal(logs.info.some((entry) => entry.message === "Keep-Going Plugin: skip: transcript changed before continuation launch"), true);
+  });
+}

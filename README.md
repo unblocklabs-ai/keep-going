@@ -27,7 +27,7 @@ Turn B is advisory. It is explicitly told to stop immediately if the previous tu
 
 Prerequisites:
 
-- OpenClaw `2026.5.3` or newer
+- OpenClaw `2026.10.5` or newer
 - an OpenAI validator key configured through `validator.llm.apiKeyRef`, `validator.llm.apiKey`, `KEEP_GOING_OPENAI_API_KEY`, or shared `OPENAI_API_KEY`
 
 Remote install:

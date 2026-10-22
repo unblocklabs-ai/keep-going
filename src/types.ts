@@ -77,7 +77,7 @@ export type SessionRoute = {
   currentChannelId?: string;
   replyToMode?: SlackReplyToMode;
   spawnedBy?: string;
-  sessionFile?: string;
+  storePath?: string;
   modelProviderId?: string;
   modelId?: string;
   authProfileId?: string;
@@ -96,6 +96,5 @@ export type LaunchContinuationParams = {
   decision: ContinuationDecision;
   sessionRoute: SessionRoute;
   wakeContext: ContinuationWakeContext;
-  sessionFile: string;
   timeoutMs: number;
 };

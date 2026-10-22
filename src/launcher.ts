@@ -9,17 +9,6 @@ import {
 import type { KeepGoingLogger } from "./logging.js";
 import type { LaunchContinuationParams } from "./types.js";
 
-export type SessionFileResolverApi = {
-  runtime: {
-    agent: {
-      session: Pick<
-        OpenClawPluginApi["runtime"]["agent"]["session"],
-        "resolveSessionFilePath"
-      >;
-    };
-  };
-};
-
 function buildContinuationWakePrompt(params: Pick<LaunchContinuationParams, "decision">): string {
   const instruction = params.decision.followUpInstruction?.trim();
   const nextStep =
@@ -38,17 +27,6 @@ function buildContinuationWakePrompt(params: Pick<LaunchContinuationParams, "dec
     "",
     `Validator-suggested next step: ${nextStep}`,
   ].join("\n");
-}
-
-export function resolveContinuationSessionFile(
-  api: SessionFileResolverApi,
-  params: Pick<LaunchContinuationParams, "candidate" | "sessionRoute">,
-): string {
-  return api.runtime.agent.session.resolveSessionFilePath(
-    params.candidate.sessionId,
-    params.sessionRoute.sessionFile ? { sessionFile: params.sessionRoute.sessionFile } : undefined,
-    { agentId: params.candidate.agentId },
-  );
 }
 
 async function deliverContinuationReplyPayload(
@@ -111,7 +89,6 @@ export async function launchContinuation(
     followUpRunId,
     sessionId: params.candidate.sessionId,
     sessionKey: params.candidate.sessionKey,
-    sessionFile: params.sessionFile,
     provider,
     model,
     timeoutMs: params.timeoutMs,
@@ -179,10 +156,16 @@ export async function launchContinuation(
 
   let runError: unknown;
   try {
-    await api.runtime.agent.runEmbeddedPiAgent({
+    await api.runtime.agent.runEmbeddedAgent({
+      agentId: params.candidate.agentId,
       sessionId: params.candidate.sessionId,
       sessionKey: params.candidate.sessionKey,
-      sessionFile: params.sessionFile,
+      sessionTarget: {
+        agentId: params.candidate.agentId,
+        sessionId: params.candidate.sessionId,
+        sessionKey: params.candidate.sessionKey,
+        storePath: params.sessionRoute.storePath,
+      },
       workspaceDir: params.candidate.workspaceDir,
       config: api.config,
       prompt,

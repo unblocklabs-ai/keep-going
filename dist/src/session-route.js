@@ -16,8 +16,7 @@ function resolveSlackReplyToMode(config, to) {
     const isDirectMessage = normalizeString(to)?.startsWith("user:") ?? false;
     if (isDirectMessage) {
         return (slackConfig.replyToModeByChatType?.direct ??
-            slackConfig.replyToMode ??
-            slackConfig.dm?.replyToMode);
+            slackConfig.replyToMode);
     }
     return slackConfig.replyToModeByChatType?.channel ?? slackConfig.replyToMode;
 }
@@ -36,7 +35,6 @@ function buildSessionRouteFields(config, entry) {
         currentChannelId: channel === "slack" ? deriveSlackChannelId(to) : undefined,
         replyToMode: channel === "slack" ? resolveSlackReplyToMode(config, to) : undefined,
         spawnedBy: normalizeString(entry.spawnedBy),
-        sessionFile: normalizeString(entry.sessionFile),
         modelProviderId: normalizeString(entry.modelProvider),
         modelId: normalizeString(entry.model),
         authProfileId: normalizeString(entry.authProfileOverride),
@@ -45,20 +43,26 @@ function buildSessionRouteFields(config, entry) {
 export function isSubagentSessionKey(sessionKey) {
     return sessionKey.includes(":subagent:");
 }
-export function resolveSessionRoute(api, params) {
+export async function resolveSessionRoute(api, params) {
     try {
         const storePath = api.runtime.agent.session.resolveStorePath(api.config.session?.store, {
             agentId: params.agentId,
         });
-        const store = api.runtime.agent.session.loadSessionStore(storePath);
+        const readEntry = (sessionKey) => api.runtime.agent.session.getSessionEntryAsync({
+            agentId: params.agentId,
+            storePath,
+            sessionKey,
+            readConsistency: "latest",
+        });
         const baseSessionKey = resolveBaseSessionKey(params.sessionKey);
-        const entry = store[params.sessionKey] ??
-            (baseSessionKey !== params.sessionKey ? store[baseSessionKey] : undefined);
+        const entry = (await readEntry(params.sessionKey)) ??
+            (baseSessionKey !== params.sessionKey ? await readEntry(baseSessionKey) : undefined);
         if (!entry) {
             return { lookupStatus: "missing-entry", isSlack: false };
         }
         return {
             lookupStatus: "ok",
+            storePath,
             ...buildSessionRouteFields(api.config, entry),
         };
     }

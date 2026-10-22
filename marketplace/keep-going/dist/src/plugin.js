@@ -2,7 +2,7 @@ import { ActiveSubagentTracker } from "./active-subagents.js";
 import { CONTINUATION_REACTION_EMOJI, resolveKeepGoingConfig } from "./config.js";
 import { KEEP_GOING_FOLLOW_UP_RUN_ID_PREFIX } from "./constants.js";
 import { OneShotDedupe } from "./dedupe.js";
-import { launchContinuation, resolveContinuationSessionFile } from "./launcher.js";
+import { launchContinuation } from "./launcher.js";
 import { validateContinuationWithLlm } from "./llm-validator.js";
 import { createKeepGoingLogger } from "./logging.js";
 import { lastAssistantHasSubagentSpawnToolCall } from "./messages.js";
@@ -135,7 +135,7 @@ function getRouteSkip(candidate, config, route) {
     }
     return undefined;
 }
-function resolveEligibleContinuationContext(runtime, event, ctx, runStartBarrier) {
+async function resolveEligibleContinuationContext(runtime, event, ctx, runStartBarrier) {
     const { api, config, logger, dedupe, activeSubagents, sessionActivity } = runtime;
     const candidate = buildCandidate(event, ctx, config);
     if (!candidate) {
@@ -147,7 +147,9 @@ function resolveEligibleContinuationContext(runtime, event, ctx, runStartBarrier
         logSkip(logger, candidateSkip.reason, candidateSkip.metadata);
         return undefined;
     }
-    const route = resolveSessionRoute(api, {
+    // Capture before the worker-backed lookup so updates during that await still abort launch.
+    const transcriptSnapshot = sessionActivity.captureSnapshot({ sessionKey: candidate.sessionKey });
+    const route = await resolveSessionRoute(api, {
         agentId: ctx.agentId,
         sessionKey: candidate.sessionKey,
     });
@@ -183,14 +185,9 @@ function resolveEligibleContinuationContext(runtime, event, ctx, runStartBarrier
         logSkip(logger, routeSkip.reason, routeSkip.metadata);
         return undefined;
     }
-    const sessionFile = resolveContinuationSessionFile(api, {
-        candidate,
-        sessionRoute: route,
-    });
     const wakeContext = {
         currentMessageId: sessionActivity.getLatestUserMessageId({
             sessionKey: candidate.sessionKey,
-            sessionFile,
         }),
         currentChannelId: route.currentChannelId,
         currentThreadTs: route.threadId,
@@ -198,11 +195,6 @@ function resolveEligibleContinuationContext(runtime, event, ctx, runStartBarrier
     };
     const reactionMessageId = sessionActivity.getLatestAssistantMessageId({
         sessionKey: candidate.sessionKey,
-        sessionFile,
-    });
-    const transcriptSnapshot = sessionActivity.captureSnapshot({
-        sessionKey: candidate.sessionKey,
-        sessionFile,
     });
     const dedupeKey = dedupe.makeKey({
         sessionKey: candidate.sessionKey,
@@ -211,7 +203,6 @@ function resolveEligibleContinuationContext(runtime, event, ctx, runStartBarrier
     logger.step("prepared continuation context", {
         runId: candidate.runId,
         sessionKey: candidate.sessionKey,
-        sessionFile,
         dedupeKey,
         threadId: route.threadId,
         currentMessageId: wakeContext.currentMessageId,
@@ -231,7 +222,6 @@ function resolveEligibleContinuationContext(runtime, event, ctx, runStartBarrier
         dedupeKey,
         route,
         wakeContext,
-        sessionFile,
         transcriptSnapshot,
         runStartBarrier,
         reactionMessageId,
@@ -284,7 +274,7 @@ async function evaluateDecision(runtime, candidate) {
 }
 function shouldAbortBeforeLaunch(runtime, context, evaluated) {
     const { logger, sessionActivity } = runtime;
-    const { candidate, route, sessionFile, transcriptSnapshot, runStartBarrier } = context;
+    const { candidate, route, transcriptSnapshot, runStartBarrier } = context;
     const { decision, validatorModel } = evaluated;
     if (!decision.continue) {
         logSkip(logger, "validator declined", {
@@ -311,7 +301,6 @@ function shouldAbortBeforeLaunch(runtime, context, evaluated) {
     }
     if (sessionActivity.hasTranscriptChanged(transcriptSnapshot, {
         sessionKey: candidate.sessionKey,
-        sessionFile,
     })) {
         logSkip(logger, "transcript changed before continuation launch", {
             runId: candidate.runId,
@@ -442,7 +431,7 @@ async function sendContinuationNoticeIfNeeded(runtime, context, reactionResult) 
 }
 async function launchEligibleContinuation(runtime, context, evaluated) {
     const { config, logger, dedupe, api, deps } = runtime;
-    const { candidate, dedupeKey, route, wakeContext, sessionFile } = context;
+    const { candidate, dedupeKey, route, wakeContext } = context;
     const { decision, validatorModel } = evaluated;
     dedupe.record(dedupeKey, {
         createdAt: Date.now(),
@@ -460,7 +449,6 @@ async function launchEligibleContinuation(runtime, context, evaluated) {
         logger.step("launching continuation", {
             runId: candidate.runId,
             sessionKey: candidate.sessionKey,
-            sessionFile,
             threadId: route.threadId,
             currentMessageId: wakeContext.currentMessageId,
             currentChannelId: wakeContext.currentChannelId,
@@ -476,7 +464,6 @@ async function launchEligibleContinuation(runtime, context, evaluated) {
             decision,
             sessionRoute: route,
             wakeContext,
-            sessionFile,
             timeoutMs: normalizeTimeoutMs(api, config.timeoutMs),
         }, logger);
         dedupe.setLaunchedFollowUpRunId(dedupeKey, launchResult.followUpRunId);
@@ -537,8 +524,8 @@ export function registerKeepGoingPlugin(api, deps = {}) {
     api.runtime.events.onSessionTranscriptUpdate((update) => {
         runtime.sessionActivity.recordTranscriptUpdate(update);
         runtime.logger.step("recorded session transcript update", {
-            sessionKey: update.sessionKey,
-            sessionFile: update.sessionFile,
+            sessionKey: update.target.sessionKey,
+            sessionId: update.target.sessionId,
             messageId: update.messageId,
             role: getMessageRole(update.message),
         });
@@ -631,7 +618,7 @@ export function registerKeepGoingPlugin(api, deps = {}) {
                 });
                 return;
             }
-            const eligible = resolveEligibleContinuationContext(runtime, event, ctx, runStartBarrier);
+            const eligible = await resolveEligibleContinuationContext(runtime, event, ctx, runStartBarrier);
             if (!eligible) {
                 return;
             }
